@@ -201,6 +201,11 @@ async def login(
         await session.commit()
         raise invalid_credentials()
 
+    # Seamlessly upgrade legacy Django pbkdf2 hash to Argon2
+    if employee.password_hash.startswith("pbkdf2_sha256$"):
+        employee.password_hash = hash_password(password)
+        session.add(employee)
+
     await record_attempt(session, email, ip_key, success=True)
     await record(session, employee.id, "employee", employee.id, "LOGIN_SUCCESS")
 

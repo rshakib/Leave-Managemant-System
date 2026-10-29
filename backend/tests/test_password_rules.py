@@ -88,3 +88,22 @@ def test_the_old_password_is_required_for_a_normal_change():
 
 def test_the_forced_first_change_does_not_need_the_old_password():
     assert current_password_required(must_change_password=True) is False
+
+
+def test_verify_django_pbkdf2_compatibility():
+    import base64
+    import hashlib
+    from app.core.security import verify_password
+
+    # Sample standard Django PBKDF2 hash
+    pwd = "secret-password-123"
+    salt = "somesalt123"
+    iters = 260000
+    digest = hashlib.pbkdf2_hmac("sha256", pwd.encode("utf-8"), salt.encode("utf-8"), iters)
+    b64_hash = base64.b64encode(digest).decode("ascii").strip()
+    django_hash = f"pbkdf2_sha256${iters}${salt}${b64_hash}"
+
+    assert verify_password(pwd, django_hash) is True
+    assert verify_password("wrong-password", django_hash) is False
+    assert verify_password("", django_hash) is False
+    assert verify_password(pwd, "pbkdf2_sha256$invalid$hash") is False

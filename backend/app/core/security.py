@@ -4,7 +4,10 @@ argon2-cffi is used directly rather than passlib, which is unmaintained and
 breaks on newer Python versions (DECISIONS D-43).
 """
 
+import base64
 from datetime import datetime, timedelta, timezone
+import hashlib
+import secrets
 
 import jwt
 from argon2 import PasswordHasher
@@ -24,8 +27,30 @@ def hash_password(password: str) -> str:
     return _hasher.hash(password)
 
 
+def _verify_django_pbkdf2(password: str, password_hash: str) -> bool:
+    """Verify Django-style pbkdf2_sha256 password hashes."""
+    try:
+        parts = password_hash.split("$", 3)
+        if len(parts) != 4 or parts[0] != "pbkdf2_sha256":
+            return False
+        _, iterations_str, salt, expected_hash = parts
+        iterations = int(iterations_str)
+        computed_digest = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            salt.encode("utf-8"),
+            iterations,
+        )
+        computed_hash = base64.b64encode(computed_digest).decode("ascii").strip()
+        return secrets.compare_digest(computed_hash, expected_hash)
+    except Exception:
+        return False
+
+
 def verify_password(password: str, password_hash: str) -> bool:
     """True if the password matches the stored hash; False otherwise."""
+    if password_hash.startswith("pbkdf2_sha256$"):
+        return _verify_django_pbkdf2(password, password_hash)
     try:
         return _hasher.verify(password_hash, password)
     except (VerificationError, InvalidHashError, ValueError):
