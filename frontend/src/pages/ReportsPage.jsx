@@ -13,6 +13,7 @@ import {
 import { useSearchParams } from 'react-router-dom'
 
 import api, { errorMessage } from '../api/client'
+import DateFilter from '../components/DateFilter.jsx'
 import NoOptions from '../components/NoOptions.jsx'
 import { useAutoRefresh } from '../hooks/useAutoRefresh.js'
 
@@ -99,6 +100,11 @@ export default function ReportsPage() {
   const [leaveTypes, setLeaveTypes] = useState([])
   const [leaveYears, setLeaveYears] = useState([])
 
+  const activeYearId = useMemo(
+    () => String(leaveYears.find((year) => year.is_active)?.id ?? ''),
+    [leaveYears],
+  )
+
   useEffect(() => {
     const loadOptions = async () => {
       try {
@@ -114,6 +120,15 @@ export default function ReportsPage() {
         setEmployees(e.data)
         setLeaveTypes(t.data)
         setLeaveYears(y.data)
+
+        const active = y.data.find((year) => year.is_active)
+        if (active) {
+          const actId = String(active.id)
+          setForm((prev) => ({
+            ...prev,
+            leave_year_id: prev.leave_year_id || actId,
+          }))
+        }
       } catch (err) {
         setError(errorMessage(err, 'Could not load the filter options.'))
       }
@@ -130,10 +145,13 @@ export default function ReportsPage() {
     [departments, form.division_id],
   )
 
-  const apiParams = useMemo(
-    () => paramsFromForm(tab, formFromParams(searchParams), offset),
-    [tab, searchParams, offset],
-  )
+  const apiParams = useMemo(() => {
+    const raw = formFromParams(searchParams)
+    if (!raw.leave_year_id && activeYearId) {
+      raw.leave_year_id = activeYearId
+    }
+    return paramsFromForm(tab, raw, offset)
+  }, [tab, searchParams, offset, activeYearId])
 
   useEffect(() => {
     let cancelled = false
@@ -169,13 +187,18 @@ export default function ReportsPage() {
   }
 
   const reset = () => {
-    setForm(emptyForm())
-    setSearchParams({ tab })
+    setForm({ ...emptyForm(), leave_year_id: activeYearId })
+    const nextParams = { tab }
+    if (activeYearId) nextParams.leave_year_id = activeYearId
+    setSearchParams(nextParams)
   }
 
   const changeTab = (next) => {
-    setForm(emptyForm())
-    setSearchParams({ tab: next })
+    const currentYear = form.leave_year_id || activeYearId
+    setForm({ ...emptyForm(), leave_year_id: currentYear })
+    const nextParams = { tab: next }
+    if (currentYear) nextParams.leave_year_id = currentYear
+    setSearchParams(nextParams)
   }
 
   const goToOffset = (next) => {
@@ -255,25 +278,23 @@ export default function ReportsPage() {
       )}
 
       <Row className="g-2 mb-3">
-        {tab === 'balances' && (
-          <Col md={3}>
-            <Form.Label className="small">Leave year</Form.Label>
-            <Form.Select
-              size="sm"
-              value={form.leave_year_id}
-              onChange={(event) => update('leave_year_id', event.target.value)}
-            >
-              <option value="">Active year</option>
-              <NoOptions when={leaveYears.length === 0} label="No leave years yet" />
-              {leaveYears.map((year) => (
-                <option key={year.id} value={year.id}>
-                  {year.name}
-                  {year.is_active ? ' (active)' : ''}
-                </option>
-              ))}
-            </Form.Select>
-          </Col>
-        )}
+        <Col md={3}>
+          <Form.Label className="small">Leave year</Form.Label>
+          <Form.Select
+            size="sm"
+            value={form.leave_year_id}
+            onChange={(event) => update('leave_year_id', event.target.value)}
+          >
+            {tab === 'history' && <option value="">All years</option>}
+            <NoOptions when={leaveYears.length === 0} label="No leave years yet" />
+            {leaveYears.map((year) => (
+              <option key={year.id} value={year.id}>
+                {year.name}
+                {year.is_active ? ' (active)' : ''}
+              </option>
+            ))}
+          </Form.Select>
+        </Col>
 
         <Col md={3}>
           <Form.Label className="small">Division</Form.Label>
@@ -368,24 +389,14 @@ export default function ReportsPage() {
                 ))}
               </Form.Select>
             </Col>
-            <Col md={3}>
-              <Form.Label className="small">Dates overlap from</Form.Label>
-              <Form.Control
-                size="sm"
-                type="date"
-                value={form.date_from}
-                onChange={(event) => update('date_from', event.target.value)}
-              />
-            </Col>
-            <Col md={3}>
-              <Form.Label className="small">Dates overlap to</Form.Label>
-              <Form.Control
-                size="sm"
-                type="date"
-                value={form.date_to}
-                onChange={(event) => update('date_to', event.target.value)}
-              />
-            </Col>
+            <DateFilter
+              dateFrom={form.date_from}
+              dateTo={form.date_to}
+              onChange={({ dateFrom, dateTo }) =>
+                setForm((prev) => ({ ...prev, date_from: dateFrom, date_to: dateTo }))
+              }
+              label="Date filter"
+            />
           </>
         )}
 
