@@ -123,6 +123,9 @@ class Settings(BaseSettings):
     org_timezone: str = "UTC"
     reminder_after_working_days: int = 2
     email_max_attempts: int = 5
+    # When true, emails are automatically sent in the background by the web server
+    embedded_email_worker: bool = True
+    embedded_worker_interval_seconds: int = 5
 
     # Reports (Phase 14).
     export_max_rows: int = 50000

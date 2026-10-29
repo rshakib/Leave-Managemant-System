@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import logging
 
@@ -67,12 +68,52 @@ async def lifespan(_app):
             await conn.execute(text("SELECT 1"))
     except Exception:
         pass
+
+    worker_task = None
+    if settings.embedded_email_worker and settings.app_env.lower() != "test":
+        from app.worker import drain_once, reminder_tick
+
+        async def _embedded_worker_loop():
+            logger.info(
+                "Embedded email worker started (interval: %ss)",
+                settings.embedded_worker_interval_seconds,
+            )
+            last_reminder = datetime.datetime.now(datetime.timezone.utc)
+            while True:
+                try:
+                    await drain_once()
+                    now = datetime.datetime.now(datetime.timezone.utc)
+                    if (now - last_reminder).total_seconds() >= 900:
+                        await reminder_tick()
+                        last_reminder = now
+                except asyncio.CancelledError:
+                    break
+                except Exception as exc:
+                    logger.warning("Embedded email worker error: %s", exc)
+
+                try:
+                    await asyncio.sleep(settings.embedded_worker_interval_seconds)
+                except asyncio.CancelledError:
+                    break
+            logger.info("Embedded email worker stopped")
+
+        worker_task = asyncio.create_task(_embedded_worker_loop())
+
     yield
+
+    if worker_task is not None:
+        worker_task.cancel()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
+
     await engine.dispose()
 
 
 app = FastAPI(
     title=settings.project_name,
+    lifespan=lifespan,
     docs_url="/docs" if _docs else None,
     redoc_url="/redoc" if _docs else None,
     openapi_url="/openapi.json" if _docs else None,
