@@ -128,6 +128,16 @@ export default function ReportsPage() {
             ...prev,
             leave_year_id: prev.leave_year_id || actId,
           }))
+          if (!searchParams.get('leave_year_id')) {
+            setSearchParams(
+              (prevParams) => {
+                const next = new URLSearchParams(prevParams)
+                next.set('leave_year_id', actId)
+                return next
+              },
+              { replace: true },
+            )
+          }
         }
       } catch (err) {
         setError(errorMessage(err, 'Could not load the filter options.'))
@@ -195,9 +205,17 @@ export default function ReportsPage() {
 
   const changeTab = (next) => {
     const currentYear = form.leave_year_id || activeYearId
-    setForm({ ...emptyForm(), leave_year_id: currentYear })
-    const nextParams = { tab: next }
-    if (currentYear) nextParams.leave_year_id = currentYear
+    const nextForm = {
+      ...form,
+      leave_year_id: currentYear,
+    }
+    if (next === 'balances') {
+      nextForm.status = ''
+      nextForm.include_reason = false
+    }
+    setForm(nextForm)
+    const nextParams = paramsFromForm(next, nextForm, 0)
+    nextParams.tab = next
     setSearchParams(nextParams)
   }
 
@@ -373,32 +391,31 @@ export default function ReportsPage() {
         </Col>
 
         {tab === 'history' && (
-          <>
-            <Col md={3}>
-              <Form.Label className="small">Status</Form.Label>
-              <Form.Select
-                size="sm"
-                value={form.status}
-                onChange={(event) => update('status', event.target.value)}
-              >
-                <option value="">Any status</option>
-                {STATUSES.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </Form.Select>
-            </Col>
-            <DateFilter
-              dateFrom={form.date_from}
-              dateTo={form.date_to}
-              onChange={({ dateFrom, dateTo }) =>
-                setForm((prev) => ({ ...prev, date_from: dateFrom, date_to: dateTo }))
-              }
-              label="Date filter"
-            />
-          </>
+          <Col md={3}>
+            <Form.Label className="small">Status</Form.Label>
+            <Form.Select
+              size="sm"
+              value={form.status}
+              onChange={(event) => update('status', event.target.value)}
+            >
+              <option value="">Any status</option>
+              {STATUSES.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </Form.Select>
+          </Col>
         )}
+
+        <DateFilter
+          dateFrom={form.date_from}
+          dateTo={form.date_to}
+          onChange={({ dateFrom, dateTo }) =>
+            setForm((prev) => ({ ...prev, date_from: dateFrom, date_to: dateTo }))
+          }
+          label="Date filter"
+        />
 
         <Col md={12} className="d-flex align-items-center gap-4">
           <Form.Check

@@ -101,11 +101,13 @@ async def balances_json(
     employee_id: int | None = None,
     leave_type_id: int | None = None,
     include_inactive_employees: bool = False,
+    date_from: datetime.date | None = None,
+    date_to: datetime.date | None = None,
     limit: int = 50,
     offset: int = 0,
     session: AsyncSession = Depends(get_session),
 ) -> BalanceReport:
-    validate_filters(limit=limit, offset=offset)
+    validate_filters(date_from=date_from, date_to=date_to, limit=limit, offset=offset)
     await check_department_belongs(session, division_id, department_id)
     year_id = await resolve_leave_year_id(session, leave_year_id)
 
@@ -116,6 +118,8 @@ async def balances_json(
         employee_id=employee_id,
         leave_type_id=leave_type_id,
         include_inactive_employees=include_inactive_employees,
+        date_from=date_from,
+        date_to=date_to,
     )
     if year_id is None:
         rows, total = [], 0
@@ -145,10 +149,12 @@ async def balances_export(
     employee_id: int | None = None,
     leave_type_id: int | None = None,
     include_inactive_employees: bool = False,
+    date_from: datetime.date | None = None,
+    date_to: datetime.date | None = None,
     session: AsyncSession = Depends(get_session),
     actor: Employee = Depends(get_current_user),
 ) -> StreamingResponse:
-    validate_filters()
+    validate_filters(date_from=date_from, date_to=date_to)
     await check_department_belongs(session, division_id, department_id)
     year_id = await resolve_leave_year_id(session, leave_year_id)
     filters = BalanceFilters(
@@ -158,6 +164,8 @@ async def balances_export(
         employee_id=employee_id,
         leave_type_id=leave_type_id,
         include_inactive_employees=include_inactive_employees,
+        date_from=date_from,
+        date_to=date_to,
     )
 
     if year_id is not None:

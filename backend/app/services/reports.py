@@ -45,6 +45,8 @@ class BalanceFilters:
     employee_id: int | None = None
     leave_type_id: int | None = None
     include_inactive_employees: bool = False
+    date_from: datetime.date | None = None
+    date_to: datetime.date | None = None
 
 
 @dataclass(frozen=True)
