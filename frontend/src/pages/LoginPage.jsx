@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Alert, Button, Form, Spinner } from 'react-bootstrap'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 
 import Icon from '../components/Icon.jsx'
 import { errorMessage, retryAfterSeconds } from '../api/client'
@@ -84,7 +84,12 @@ export default function LoginPage() {
           </Form.Group>
 
           <Form.Group className="mb-3" controlId="loginPassword">
-            <Form.Label className="small fw-semibold">Password</Form.Label>
+            <div className="d-flex justify-content-between align-items-center mb-1">
+              <Form.Label className="small fw-semibold mb-0">Password</Form.Label>
+              <Link to="/forgot-password" className="small text-decoration-none text-muted">
+                Forgot password?
+              </Link>
+            </div>
             <Form.Control
               type="password"
               size="lg"
@@ -114,7 +119,7 @@ export default function LoginPage() {
         </Form>
 
         <p className="text-center text-muted small mt-4 mb-0">
-          Forgot your password? Ask an administrator to reset it.
+          Need an account or help? Contact your administrator.
         </p>
       </div>
     </div>

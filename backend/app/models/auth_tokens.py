@@ -84,3 +84,29 @@ class LoginAttempt(BaseModel, SQLModel, table=True):
     success: bool = Field(
         sa_column=Column(Boolean, nullable=False, server_default=text("false"))
     )
+
+
+class PasswordResetToken(BaseModel, SQLModel, table=True):
+    """A time-limited, single-use token for password resets.
+
+    Stores only the SHA-256 hash of the token, never the plaintext token itself.
+    """
+
+    __tablename__ = "password_reset_token"
+    __table_args__ = (
+        Index("ix_password_reset_token_hash", "token_hash", unique=True),
+        Index("ix_password_reset_token_employee", "employee_id", "expires_at"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True, sa_type=BigInteger)
+    employee_id: int = Field(
+        foreign_key="employee.id", sa_type=BigInteger, nullable=False
+    )
+    token_hash: str = Field(nullable=False, max_length=64)
+    expires_at: datetime.datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
+    used_at: datetime.datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    ip_hash: str | None = Field(default=None, max_length=64)

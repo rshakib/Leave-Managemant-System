@@ -7,6 +7,7 @@ from app.services.email_rules import (
     APPROVER_ACTED,
     CANCELLED,
     CANCELLED_EMPLOYEE,
+    PASSWORD_RESET,
     REJECTED,
     REMINDER,
     SUBMITTED,
@@ -52,14 +53,23 @@ def payload(**overrides):
 
 @pytest.mark.parametrize(
     "event",
-    [SUBMITTED, APPROVER_ACTED, APPROVED, REJECTED, CANCELLED, CANCELLED_EMPLOYEE, REMINDER],
+    [SUBMITTED, APPROVER_ACTED, APPROVED, REJECTED, CANCELLED, CANCELLED_EMPLOYEE, REMINDER, PASSWORD_RESET],
 )
 def test_every_event_renders_a_subject_text_and_html(event):
-    subject, text, html = render_email(event, payload(), BASE)
+    data = payload(token="secure_test_token_123")
+    subject, text, html = render_email(event, data, BASE)
     assert subject
     assert text.strip()
     assert html.strip()
     assert "\r" not in subject and "\n" not in subject
+
+
+def test_password_reset_links_to_reset_page():
+    data = payload(token="abc-reset-token-xyz")
+    subject, text, html = render_email(PASSWORD_RESET, data, BASE)
+    assert f"{BASE}/reset-password?token=abc-reset-token-xyz" in text
+    assert f"{BASE}/reset-password?token=abc-reset-token-xyz" in html
+    assert "password" in subject.lower()
 
 
 def test_links_never_contain_a_token():

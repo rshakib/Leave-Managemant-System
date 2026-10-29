@@ -62,6 +62,10 @@ AUDIT_REGISTRY: dict[str, str] = {
     ),
     "POST /auth/logout-all": AUDITED,
     "POST /auth/change-password": AUDITED,
+    "POST /auth/forgot-password": (
+        "exempt: public request to trigger reset link; logged and rate-limited via security rules."
+    ),
+    "POST /auth/reset-password": AUDITED,
     # Ending one device writes a SESSION_REVOKED row in services/sessions.py.
     "DELETE /auth/sessions/{session_id}": AUDITED,
     "POST /admin/emails/{email_id}/retry": (

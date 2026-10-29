@@ -6,7 +6,7 @@ autogenerate only sees tables whose models have been imported, and
 """
 
 from app.models.audit_log import AuditLog, AuditLogPage, AuditLogRead
-from app.models.auth_tokens import LoginAttempt, RefreshToken
+from app.models.auth_tokens import LoginAttempt, PasswordResetToken, RefreshToken
 from app.models.balance_adjustment import (
     AdjustmentCreate,
     AdjustmentField,

@@ -13,6 +13,7 @@ from app.services.email_rules import (
     APPROVER_ACTED,
     CANCELLED,
     CANCELLED_EMPLOYEE,
+    PASSWORD_RESET,
     REJECTED,
     REMINDER,
     SUBMITTED,
@@ -38,6 +39,7 @@ SUBJECTS = {
     CANCELLED: "Leave request cancelled ({employee_name})",
     CANCELLED_EMPLOYEE: "Your leave request was cancelled by an administrator",
     REMINDER: "Reminder: {count} leave request(s) waiting for your decision",
+    PASSWORD_RESET: "Reset your Leave Management password",
 }
 
 
@@ -50,6 +52,8 @@ def _link(event_type: str, payload: dict, base_url: str) -> str:
     base = (base_url or "").rstrip("/")
     if event_type == REMINDER:
         return f"{base}/approvals"
+    if event_type == PASSWORD_RESET:
+        return f"{base}/reset-password?token={payload.get('token')}"
     return f"{base}/leave-requests/{payload.get('request_id')}"
 
 

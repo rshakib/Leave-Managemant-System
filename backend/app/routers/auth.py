@@ -1,19 +1,26 @@
 import datetime
+import secrets
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import SQLModel
+from sqlmodel import SQLModel, select
 
 from app.core.config import settings
 from app.core.deps import get_current_user, load_roles
+from app.core.security import hash_password
 from app.db.session import get_session
+from app.models.auth_tokens import PasswordResetToken
+from app.models.email_outbox import EmailOutbox, EmailStatus
 from app.models.employee import Employee, EmployeeRead, employee_to_read
 from app.services import auth_service
 from app.services import sessions as sessions_service
-from app.services.security_rules import client_ip
+from app.services.audit import record
+from app.services.email_rules import PASSWORD_RESET
+from app.services.security_rules import check_password_policy, client_ip, hash_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -24,6 +31,15 @@ class ChangePasswordIn(SQLModel):
     # Optional ONLY for the forced first change (D-198). A normal password change
     # still requires it, and a value that IS sent is always verified.
     current_password: str | None = None
+    new_password: str
+
+
+class ForgotPasswordIn(SQLModel):
+    email: str
+
+
+class ResetPasswordIn(SQLModel):
+    token: str
     new_password: str
 
 
@@ -220,3 +236,134 @@ async def read_me(
     session: AsyncSession = Depends(get_session),
 ) -> EmployeeRead:
     return employee_to_read(employee, await load_roles(session, employee.id))
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    payload: ForgotPasswordIn,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, object]:
+    """Trigger a password reset link email.
+
+    Always returns 200 with the same message to prevent user enumeration.
+    """
+    email = payload.email.strip().lower()
+    if email:
+        employee = await session.scalar(
+            select(Employee).where(func.lower(Employee.email) == email)
+        )
+        if employee is not None and employee.is_active:
+            raw_token = secrets.token_urlsafe(32)
+            token_hashed = hash_token(raw_token)
+            now = datetime.datetime.now(datetime.timezone.utc)
+            expires_at = now + datetime.timedelta(minutes=30)
+            client_ip_hash = hash_token(_ip(request))
+
+            reset_record = PasswordResetToken(
+                employee_id=employee.id,
+                token_hash=token_hashed,
+                expires_at=expires_at,
+                ip_hash=client_ip_hash,
+            )
+            session.add(reset_record)
+
+            session.add(
+                EmailOutbox(
+                    event_type=PASSWORD_RESET,
+                    to_emails=[employee.email],
+                    payload={
+                        "token": raw_token,
+                        "employee_name": employee.full_name,
+                    },
+                    status=EmailStatus.PENDING,
+                )
+            )
+            await session.commit()
+
+    return {
+        "ok": True,
+        "message": "If this email is registered, a password reset link has been sent to your inbox.",
+    }
+
+
+@router.get("/verify-reset-token")
+async def verify_reset_token(
+    token: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, object]:
+    """Check if a password reset token is valid and unexpired."""
+    token_hashed = hash_token(token)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    record_obj = await session.scalar(
+        select(PasswordResetToken).where(
+            PasswordResetToken.token_hash == token_hashed,
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.expires_at > now,
+        )
+    )
+    if record_obj is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This password reset link is invalid or has expired.",
+        )
+    employee = await session.get(Employee, record_obj.employee_id)
+    if employee is None or not employee.is_active:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This account is no longer active.",
+        )
+    return {"valid": True, "email": employee.email}
+
+
+@router.post("/reset-password")
+async def reset_password(
+    payload: ResetPasswordIn,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, object]:
+    """Consume a valid reset token and update the password."""
+    token_hashed = hash_token(payload.token)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    record_obj = await session.scalar(
+        select(PasswordResetToken).where(
+            PasswordResetToken.token_hash == token_hashed,
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.expires_at > now,
+        ).with_for_update()
+    )
+    if record_obj is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This password reset link is invalid or has expired. Please request a new one.",
+        )
+    employee = await session.get(Employee, record_obj.employee_id)
+    if employee is None or not employee.is_active:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This account is no longer active.",
+        )
+
+    problems = check_password_policy(payload.new_password, employee.email)
+    if problems:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, problems)
+
+    employee.password_hash = hash_password(payload.new_password)
+    employee.must_change_password = False
+    record_obj.used_at = now
+
+    await auth_service.revoke_all(session, employee.id)
+
+    await record(
+        session,
+        employee.id,
+        "employee",
+        employee.id,
+        "PASSWORD_RESET",
+        reason="password reset via email reset link",
+    )
+    await session.commit()
+
+    return {
+        "ok": True,
+        "message": "Password has been successfully reset. You can now sign in with your new password.",
+    }
