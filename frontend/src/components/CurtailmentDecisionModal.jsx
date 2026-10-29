@@ -62,6 +62,11 @@ export default function CurtailmentDecisionModal({
               </div>
               <div>
                 <strong>Curtailed End Date:</strong> {curtailment.curtailed_end_date}
+                {curtailment.curtailed_day_type && curtailment.curtailed_day_type !== 'FULL_DAY' && (
+                  <span className="ms-1 badge bg-info text-dark">
+                    {curtailment.curtailed_day_type}
+                  </span>
+                )}
               </div>
               <div>
                 <strong>Days to Refund:</strong> +{Number(curtailment.days_to_refund).toFixed(2)} days
@@ -112,3 +117,4 @@ export default function CurtailmentDecisionModal({
     </Modal>
   )
 }
+

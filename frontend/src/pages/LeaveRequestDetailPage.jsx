@@ -182,7 +182,9 @@ export default function LeaveRequestDetailPage() {
               variant="outline-primary"
               onClick={() => setEarlyReturnOpen(true)}
             >
-              Report Early Return
+              {request.start_date === request.end_date
+                ? 'Reduce to Half Day'
+                : 'Report Early Return'}
             </Button>
           )}
           {request.can_cancel && (
@@ -418,6 +420,9 @@ export default function LeaveRequestDetailPage() {
                     <td>{new Date(c.submitted_at).toLocaleDateString()}</td>
                     <td>
                       <strong>{c.curtailed_end_date}</strong>
+                      {c.curtailed_day_type && c.curtailed_day_type !== 'FULL_DAY' && (
+                        <div className="small text-muted">{c.curtailed_day_type}</div>
+                      )}
                     </td>
                     <td>
                       <Badge bg="success">+{days(c.days_to_refund)} days</Badge>

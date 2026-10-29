@@ -148,12 +148,20 @@ async def _detail(
     curtailments = await list_curtailments_for_request(session, current, request.id)
     has_pending_curtailment = any(c.status == CurtailmentStatus.PENDING for c in curtailments)
     is_owner_or_admin = (request.employee_id == current.id) or (Role.ADMIN in actor_roles)
+    is_curtailable = (
+        request.start_date < request.end_date
+        or (
+            request.start_date == request.end_date
+            and request.day_type == DayType.FULL_DAY
+            and Decimal(str(request.chargeable_days)) > Decimal("0.5")
+        )
+    )
     can_curtail = (
         request.status == RequestStatus.APPROVED
         and is_owner_or_admin
         and not bool(closed_year_names)
         and not has_pending_curtailment
-        and request.start_date < request.end_date
+        and is_curtailable
     )
 
     return LeaveRequestDetail(

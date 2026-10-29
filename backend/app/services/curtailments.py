@@ -76,10 +76,21 @@ async def _check_curtailment_eligibility(
     )
     has_pending = pending_curtailment is not None
 
+    # 3. Check if curtailable (multi-day or 1-day full day)
+    is_curtailable = (
+        request.start_date < request.end_date
+        or (
+            request.start_date == request.end_date
+            and request.day_type == "FULL_DAY"
+            and request.chargeable_days > Decimal("0.5")
+        )
+    )
+
     return can_request_curtailment(
         request_status=request.status,
         touches_closed_year=touches_closed_year,
         has_pending_curtailment=has_pending,
+        is_curtailable=is_curtailable,
     )
 
 
@@ -88,6 +99,7 @@ async def get_curtailment_preview(
     actor: Employee,
     request_id: int,
     curtailed_end_date: datetime.date,
+    curtailed_day_type: Optional[str] = "FULL_DAY",
 ) -> CurtailmentPreview:
     """Calculate the preview for an early return, returning new chargeable days and refund."""
     request = await session.get(LeaveRequest, request_id)
@@ -108,6 +120,7 @@ async def get_curtailment_preview(
             leave_request_id=request.id,
             original_end_date=request.end_date,
             curtailed_end_date=curtailed_end_date,
+            curtailed_day_type=curtailed_day_type,
             original_days=request.chargeable_days,
             new_days=request.chargeable_days,
             days_to_refund=Decimal("0"),
@@ -115,13 +128,26 @@ async def get_curtailment_preview(
             error=err,
         )
 
+    target_day_type = (
+        curtailed_day_type
+        if curtailed_day_type in ("FULL_DAY", "FIRST_HALF", "SECOND_HALF")
+        else request.day_type
+    )
+
     try:
-        validate_curtailment_dates(request.start_date, request.end_date, curtailed_end_date)
+        validate_curtailment_dates(
+            request.start_date,
+            request.end_date,
+            curtailed_end_date,
+            str(request.day_type),
+            str(target_day_type),
+        )
     except CurtailmentRuleError as exc:
         return CurtailmentPreview(
             leave_request_id=request.id,
             original_end_date=request.end_date,
             curtailed_end_date=curtailed_end_date,
+            curtailed_day_type=curtailed_day_type,
             original_days=request.chargeable_days,
             new_days=request.chargeable_days,
             days_to_refund=Decimal("0"),
@@ -131,13 +157,14 @@ async def get_curtailment_preview(
 
     try:
         preview = await build_preview(
-            session, employee, request.start_date, curtailed_end_date, request.day_type
+            session, employee, request.start_date, curtailed_end_date, target_day_type
         )
     except DayCalcError as exc:
         return CurtailmentPreview(
             leave_request_id=request.id,
             original_end_date=request.end_date,
             curtailed_end_date=curtailed_end_date,
+            curtailed_day_type=curtailed_day_type,
             original_days=request.chargeable_days,
             new_days=request.chargeable_days,
             days_to_refund=Decimal("0"),
@@ -153,6 +180,7 @@ async def get_curtailment_preview(
             leave_request_id=request.id,
             original_end_date=request.end_date,
             curtailed_end_date=curtailed_end_date,
+            curtailed_day_type=curtailed_day_type,
             original_days=request.chargeable_days,
             new_days=new_days,
             days_to_refund=Decimal("0"),
@@ -164,6 +192,7 @@ async def get_curtailment_preview(
         leave_request_id=request.id,
         original_end_date=request.end_date,
         curtailed_end_date=curtailed_end_date,
+        curtailed_day_type=curtailed_day_type,
         original_days=request.chargeable_days,
         new_days=new_days,
         days_to_refund=refund,
@@ -204,15 +233,27 @@ async def submit_curtailment(
     if not can_curtail:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, err or "Cannot curtail request.")
 
+    target_day_type = (
+        payload.curtailed_day_type
+        if payload.curtailed_day_type in ("FULL_DAY", "FIRST_HALF", "SECOND_HALF")
+        else request.day_type
+    )
+
     try:
-        validate_curtailment_dates(request.start_date, request.end_date, payload.curtailed_end_date)
+        validate_curtailment_dates(
+            request.start_date,
+            request.end_date,
+            payload.curtailed_end_date,
+            str(request.day_type),
+            str(target_day_type),
+        )
     except CurtailmentRuleError as exc:
         raise HTTPException(exc.http_status, exc.message)
 
     employee = await session.get(Employee, request.employee_id)
     try:
         preview = await build_preview(
-            session, employee, request.start_date, payload.curtailed_end_date, request.day_type
+            session, employee, request.start_date, payload.curtailed_end_date, target_day_type
         )
     except DayCalcError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
@@ -228,6 +269,7 @@ async def submit_curtailment(
         employee_id=request.employee_id,
         original_end_date=request.end_date,
         curtailed_end_date=payload.curtailed_end_date,
+        curtailed_day_type=str(target_day_type),
         original_days=request.chargeable_days,
         new_days=new_days,
         days_to_refund=refund,
@@ -352,11 +394,16 @@ async def approve_curtailment(
     year_ids = [a.leave_year_id for a in allocations] or [request.leave_year_id]
 
     employee = await session.get(Employee, request.employee_id)
+    target_day_type = (
+        curtailment.curtailed_day_type
+        if curtailment.curtailed_day_type in ("FULL_DAY", "FIRST_HALF", "SECOND_HALF")
+        else request.day_type
+    )
     new_preview = await build_preview(
-        session, employee, request.start_date, curtailment.curtailed_end_date, request.day_type
+        session, employee, request.start_date, curtailment.curtailed_end_date, target_day_type
     )
     all_years = list((await session.scalars(select(LeaveYear))).all())
-    new_splits = split_days_by_leave_year(new_preview.days, all_years, request.day_type)
+    new_splits = split_days_by_leave_year(new_preview.days, all_years, target_day_type)
 
     # 4. Lock LeaveBalance rows ordered by leave_year_id
     balances = {
@@ -392,6 +439,8 @@ async def approve_curtailment(
     # 6. Update request dates and chargeable days
     request.end_date = curtailment.curtailed_end_date
     request.chargeable_days = curtailment.new_days
+    if curtailment.curtailed_day_type:
+        request.day_type = curtailment.curtailed_day_type
 
     # 7. Mark curtailment as APPROVED
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -659,6 +708,7 @@ async def _to_read_models(
                 original_start_date=req.start_date if req else None,
                 original_end_date=r.original_end_date,
                 curtailed_end_date=r.curtailed_end_date,
+                curtailed_day_type=r.curtailed_day_type,
                 original_days=r.original_days,
                 new_days=r.new_days,
                 days_to_refund=r.days_to_refund,
@@ -672,3 +722,4 @@ async def _to_read_models(
             )
         )
     return out
+

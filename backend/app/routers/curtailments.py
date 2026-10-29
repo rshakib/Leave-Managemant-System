@@ -35,11 +35,14 @@ router = APIRouter(tags=["curtailments"])
 async def preview_curtailment(
     request_id: int,
     curtailed_end_date: datetime.date = Query(..., description="Proposed new earlier end date"),
+    curtailed_day_type: Optional[str] = Query(default="FULL_DAY", description="Target day type: FULL_DAY, FIRST_HALF, SECOND_HALF"),
     current: Employee = Depends(require_roles(Role.EMPLOYEE)),
     session: AsyncSession = Depends(get_session),
 ) -> CurtailmentPreview:
     """Preview days and refund for an early return."""
-    return await get_curtailment_preview(session, current, request_id, curtailed_end_date)
+    return await get_curtailment_preview(
+        session, current, request_id, curtailed_end_date, curtailed_day_type
+    )
 
 
 @router.post(
@@ -138,3 +141,4 @@ async def cancel_curtailment_endpoint(
     curtailment = await cancel_curtailment(session, current, curtailment_id)
     rows = await list_curtailments_for_request(session, current, curtailment.leave_request_id)
     return next(r for r in rows if r.id == curtailment.id)
+

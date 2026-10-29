@@ -19,21 +19,31 @@ def validate_curtailment_dates(
     start_date: date,
     original_end_date: date,
     curtailed_end_date: date,
+    original_day_type: str = "FULL_DAY",
+    curtailed_day_type: str = "FULL_DAY",
 ) -> None:
-    """Validate that the curtailed end date is within a valid range.
+    """Validate that the curtailed end date and day type are valid.
 
-    Must be on or after the original start date, and strictly before the original end date.
+    - Must be on or after start_date.
+    - Must be on or before original_end_date.
+    - If curtailed_end_date == original_end_date, it is ONLY valid if original was FULL_DAY and curtailed is half day (FIRST_HALF or SECOND_HALF).
     """
     if curtailed_end_date < start_date:
         raise CurtailmentRuleError(
             f"Curtailed end date ({curtailed_end_date}) cannot be before the start date ({start_date}).",
             400,
         )
-    if curtailed_end_date >= original_end_date:
+    if curtailed_end_date > original_end_date:
         raise CurtailmentRuleError(
-            f"Curtailed end date ({curtailed_end_date}) must be strictly before the original end date ({original_end_date}).",
+            f"Curtailed end date ({curtailed_end_date}) cannot be after the original end date ({original_end_date}).",
             400,
         )
+    if curtailed_end_date == original_end_date:
+        if not (original_day_type == "FULL_DAY" and curtailed_day_type in ("FIRST_HALF", "SECOND_HALF")):
+            raise CurtailmentRuleError(
+                f"Curtailed end date must be before the original end date ({original_end_date}), or select half-day for a single day leave.",
+                400,
+            )
 
 
 def calculate_curtailment_refund(
@@ -60,6 +70,7 @@ def can_request_curtailment(
     request_status: str,
     touches_closed_year: bool = False,
     has_pending_curtailment: bool = False,
+    is_curtailable: bool = True,
 ) -> tuple[bool, Optional[str]]:
     """Determine whether an employee can submit an early return request."""
     if request_status != "APPROVED":
@@ -68,4 +79,6 @@ def can_request_curtailment(
         return False, "Cannot curtail a leave request touching a closed leave year."
     if has_pending_curtailment:
         return False, "An early return request is already pending decision for this leave request."
+    if not is_curtailable:
+        return False, "This leave request cannot be reduced further (already a half day)."
     return True, None

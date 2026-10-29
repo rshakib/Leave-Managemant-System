@@ -21,6 +21,19 @@ def test_validate_curtailment_dates_valid():
     validate_curtailment_dates(start, end, start)
 
 
+def test_validate_curtailment_dates_half_day_same_date():
+    # 1-day leave: start_date == end_date, original FULL_DAY
+    start = date(2026, 11, 1)
+    end = date(2026, 11, 1)
+    # Valid when curtailed to half day
+    validate_curtailment_dates(start, end, start, original_day_type="FULL_DAY", curtailed_day_type="FIRST_HALF")
+    validate_curtailment_dates(start, end, start, original_day_type="FULL_DAY", curtailed_day_type="SECOND_HALF")
+
+    # Invalid when curtailed to full day (no change)
+    with pytest.raises(CurtailmentRuleError, match="must be before the original end date"):
+        validate_curtailment_dates(start, end, start, original_day_type="FULL_DAY", curtailed_day_type="FULL_DAY")
+
+
 def test_validate_curtailment_dates_before_start():
     start = date(2026, 11, 2)
     end = date(2026, 11, 5)
@@ -28,13 +41,10 @@ def test_validate_curtailment_dates_before_start():
         validate_curtailment_dates(start, end, date(2026, 11, 1))
 
 
-def test_validate_curtailment_dates_equal_or_after_end():
+def test_validate_curtailment_dates_after_end():
     start = date(2026, 11, 1)
     end = date(2026, 11, 5)
-    with pytest.raises(CurtailmentRuleError, match="must be strictly before"):
-        validate_curtailment_dates(start, end, end)
-
-    with pytest.raises(CurtailmentRuleError, match="must be strictly before"):
+    with pytest.raises(CurtailmentRuleError, match="cannot be after the original end date"):
         validate_curtailment_dates(start, end, date(2026, 11, 6))
 
 
@@ -86,3 +96,7 @@ def test_can_request_curtailment():
     ok, err = can_request_curtailment("APPROVED", has_pending_curtailment=True)
     assert ok is False
     assert "already pending" in err
+
+    ok, err = can_request_curtailment("APPROVED", is_curtailable=False)
+    assert ok is False
+    assert "cannot be reduced further" in err

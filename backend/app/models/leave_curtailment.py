@@ -48,6 +48,9 @@ class LeaveCurtailment(BaseModel, SQLModel, table=True):
     )
     original_end_date: date = Field(nullable=False)
     curtailed_end_date: date = Field(nullable=False)
+    curtailed_day_type: Optional[str] = Field(
+        default=None, sa_column=Column(String(20), nullable=True)
+    )
     original_days: Decimal = Field(
         sa_column=Column(Numeric(5, 2), nullable=False)
     )
@@ -79,6 +82,7 @@ class LeaveCurtailment(BaseModel, SQLModel, table=True):
 
 class CurtailmentCreate(SQLModel):
     curtailed_end_date: date
+    curtailed_day_type: Optional[str] = "FULL_DAY"
     reason: str
 
 
@@ -86,6 +90,7 @@ class CurtailmentPreview(SQLModel):
     leave_request_id: int
     original_end_date: date
     curtailed_end_date: date
+    curtailed_day_type: Optional[str] = "FULL_DAY"
     original_days: Decimal
     new_days: Decimal
     days_to_refund: Decimal
@@ -108,6 +113,7 @@ class CurtailmentRead(SQLModel):
     original_start_date: Optional[date] = None
     original_end_date: date
     curtailed_end_date: date
+    curtailed_day_type: Optional[str] = None
     original_days: Decimal
     new_days: Decimal
     days_to_refund: Decimal

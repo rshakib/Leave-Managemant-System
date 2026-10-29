@@ -24,6 +24,7 @@ ENTITY_TYPES = frozenset(
         "weekend_setting",
         "holiday",
         "leave_request",
+        "leave_curtailment",
         "report",
         "email",
     }
