@@ -4,7 +4,9 @@ import { useNavigate, useParams } from 'react-router-dom'
 
 import api, { errorMessage } from '../api/client'
 import { useAuth } from '../auth/AuthContext.jsx'
+import CurtailmentDecisionModal from '../components/CurtailmentDecisionModal'
 import DecisionModal from '../components/DecisionModal'
+import EarlyReturnModal from '../components/EarlyReturnModal'
 import RequestStatusBadge from '../components/RequestStatusBadge'
 import { useAutoRefresh } from '../hooks/useAutoRefresh.js'
 
@@ -34,6 +36,25 @@ export default function LeaveRequestDetailPage() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState(null)
   const [historyLoading, setHistoryLoading] = useState(false)
+
+  const [earlyReturnOpen, setEarlyReturnOpen] = useState(false)
+  const [curtailmentDecision, setCurtailmentDecision] = useState(null)
+  const [curtailmentActionBusy, setCurtailmentActionBusy] = useState(false)
+
+  const handleCancelCurtailment = async (curtailmentId) => {
+    if (!window.confirm('Are you sure you want to cancel this early return request?')) return
+    setCurtailmentActionBusy(true)
+    setError('')
+    try {
+      await api.delete(`/curtailments/${curtailmentId}`)
+      setNotice('Early return request cancelled.')
+      load()
+    } catch (err) {
+      setError(errorMessage(err, 'Failed to cancel early return request.'))
+    } finally {
+      setCurtailmentActionBusy(false)
+    }
+  }
 
   const toggleHistory = async () => {
     const next = !historyOpen
@@ -155,6 +176,15 @@ export default function LeaveRequestDetailPage() {
         <h1 className="h3 mb-0">Leave request #{request.id}</h1>
         <div className="d-flex align-items-center gap-2">
           <RequestStatusBadge status={request.status} />
+          {request.can_curtail && (
+            <Button
+              size="sm"
+              variant="outline-primary"
+              onClick={() => setEarlyReturnOpen(true)}
+            >
+              Report Early Return
+            </Button>
+          )}
           {request.can_cancel && (
             <Button
               size="sm"
@@ -354,6 +384,142 @@ export default function LeaveRequestDetailPage() {
           </Card>
         </Col>
       </Row>
+
+      {request.curtailments && request.curtailments.length > 0 && (
+        <Card className="mt-3">
+          <Card.Header className="d-flex justify-content-between align-items-center">
+            <strong className="h6 mb-0">Early Return / Curtailment Requests</strong>
+            {request.can_curtail && (
+              <Button
+                size="sm"
+                variant="outline-primary"
+                onClick={() => setEarlyReturnOpen(true)}
+              >
+                Report Early Return
+              </Button>
+            )}
+          </Card.Header>
+          <Card.Body className="p-0">
+            <Table responsive hover className="mb-0">
+              <thead>
+                <tr>
+                  <th>Submitted</th>
+                  <th>New End Date</th>
+                  <th>Refunded Days</th>
+                  <th>Reason</th>
+                  <th>Status</th>
+                  <th>Decision</th>
+                  <th className="text-end">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {request.curtailments.map((c) => (
+                  <tr key={c.id}>
+                    <td>{new Date(c.submitted_at).toLocaleDateString()}</td>
+                    <td>
+                      <strong>{c.curtailed_end_date}</strong>
+                    </td>
+                    <td>
+                      <Badge bg="success">+{days(c.days_to_refund)} days</Badge>
+                    </td>
+                    <td>{c.reason}</td>
+                    <td>
+                      <Badge
+                        bg={
+                          c.status === 'APPROVED'
+                            ? 'success'
+                            : c.status === 'REJECTED'
+                              ? 'danger'
+                              : c.status === 'PENDING'
+                                ? 'warning'
+                                : 'secondary'
+                        }
+                      >
+                        {c.status}
+                      </Badge>
+                    </td>
+                    <td>
+                      {c.decided_at ? (
+                        <div className="small">
+                          <div>By: {c.decided_by_name ?? 'Approver'}</div>
+                          {c.decision_note && (
+                            <div className="text-muted fst-italic">“{c.decision_note}”</div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-muted small">Awaiting decision</span>
+                      )}
+                    </td>
+                    <td className="text-end">
+                      {c.status === 'PENDING' && (
+                        <div className="d-flex justify-content-end gap-1">
+                          {(user?.roles?.includes('APPROVER') || isAdmin) && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="success"
+                                onClick={() =>
+                                  setCurtailmentDecision({ action: 'approve', curtailment: c })
+                                }
+                              >
+                                Approve
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="danger"
+                                onClick={() =>
+                                  setCurtailmentDecision({ action: 'reject', curtailment: c })
+                                }
+                              >
+                                Reject
+                              </Button>
+                            </>
+                          )}
+                          {(request.employee_id === user?.id || isAdmin) && (
+                            <Button
+                              size="sm"
+                              variant="outline-secondary"
+                              disabled={curtailmentActionBusy}
+                              onClick={() => handleCancelCurtailment(c.id)}
+                            >
+                              Cancel
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </Card.Body>
+        </Card>
+      )}
+
+      <EarlyReturnModal
+        show={earlyReturnOpen}
+        request={request}
+        onHide={() => setEarlyReturnOpen(false)}
+        onSuccess={() => {
+          setNotice('Early return request submitted successfully.')
+          load()
+        }}
+      />
+
+      <CurtailmentDecisionModal
+        show={curtailmentDecision !== null}
+        action={curtailmentDecision?.action}
+        curtailment={curtailmentDecision?.curtailment}
+        onHide={() => setCurtailmentDecision(null)}
+        onDecided={({ conflict }) => {
+          setNotice(
+            conflict
+              ? 'That early return request was updated by someone else.'
+              : 'Decision saved successfully.'
+          )
+          load()
+        }}
+      />
 
       <DecisionModal
         show={decision !== null}

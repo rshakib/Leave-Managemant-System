@@ -33,11 +33,13 @@ from app.models.leave_request import (
     LeaveRequestSummary,
     RequestStatus,
 )
+from app.models.leave_curtailment import CurtailmentStatus
 from app.models.leave_type import LeaveType
 from app.models.leave_year import LeaveYear
 from app.services import storage
 from app.services.cancel_rules import can_cancel
 from app.services.cancellations import cancel as cancel_request
+from app.services.curtailments import list_curtailments_for_request
 from app.services.day_calc import DayType
 from app.services.leave_requests import evaluate, submit
 
@@ -143,11 +145,24 @@ async def _detail(
         if year.is_closed
     ) if touched_year_ids else []
 
+    curtailments = await list_curtailments_for_request(session, current, request.id)
+    has_pending_curtailment = any(c.status == CurtailmentStatus.PENDING for c in curtailments)
+    is_owner_or_admin = (request.employee_id == current.id) or (Role.ADMIN in actor_roles)
+    can_curtail = (
+        request.status == RequestStatus.APPROVED
+        and is_owner_or_admin
+        and not bool(closed_year_names)
+        and not has_pending_curtailment
+        and request.start_date < request.end_date
+    )
+
     return LeaveRequestDetail(
         **_summary(request, leave_type).model_dump(),
         touches_closed_year=bool(closed_year_names),
         closed_year_names=closed_year_names,
         my_pending_approval=mine,
+        can_curtail=can_curtail,
+        curtailments=curtailments,
         can_cancel=can_cancel(
             request.status,
             request.employee_id,

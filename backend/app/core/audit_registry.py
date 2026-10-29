@@ -49,6 +49,11 @@ AUDIT_REGISTRY: dict[str, str] = {
     "POST /leave-requests/{request_id}/approve": AUDITED,
     "POST /leave-requests/{request_id}/reject": AUDITED,
     "POST /leave-requests/{request_id}/cancel": AUDITED,
+    # --- leave curtailment / early return ----------------------------------
+    "POST /leave-requests/{request_id}/curtail": AUDITED,
+    "POST /curtailments/{curtailment_id}/approve": AUDITED,
+    "POST /curtailments/{curtailment_id}/reject": AUDITED,
+    "DELETE /curtailments/{curtailment_id}": AUDITED,
     # --- deliberately NOT audited ------------------------------------------
     # Runs the outbox worker for one pass: a system action, no data change.
     "POST /admin/emails/process-queue": (

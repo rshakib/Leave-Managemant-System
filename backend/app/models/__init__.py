@@ -38,6 +38,14 @@ from app.models.leave_carry_forward import (
     ClosingTypeTotal,
     LeaveCarryForward,
 )
+from app.models.leave_curtailment import (
+    CurtailmentCreate,
+    CurtailmentDecision,
+    CurtailmentPreview,
+    CurtailmentRead,
+    CurtailmentStatus,
+    LeaveCurtailment,
+)
 from app.models.leave_request import (
     ApprovalStatus,
     LeaveRequest,
@@ -91,6 +99,7 @@ __all__ = [
     "EmailAttempt",
     "EmailStatus",
     "LeaveRequest",
+    "LeaveCurtailment",
     "LeaveRequestAllocation",
     "LeaveRequestApproval",
     "RequestStatus",

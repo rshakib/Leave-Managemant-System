@@ -26,6 +26,7 @@ from app.routers import (
     approvers,
     auth,
     calendar,
+    curtailments,
     departments,
     divisions,
     employees,
@@ -148,6 +149,7 @@ app.include_router(holidays.router)
 app.include_router(calendar.router)
 app.include_router(approvers.router)
 app.include_router(leave_requests.router)
+app.include_router(curtailments.router)
 app.include_router(approvals.router)
 app.include_router(admin_emails.router)
 @app.middleware("http")

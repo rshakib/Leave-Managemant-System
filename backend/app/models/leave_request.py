@@ -19,6 +19,7 @@ from sqlmodel import Field, SQLModel
 
 from app.models.base import BaseModel
 from app.models.calendar import PreviewDay
+from app.models.leave_curtailment import CurtailmentRead
 from app.services.day_calc import DayType
 
 
@@ -219,6 +220,8 @@ class LeaveRequestDetail(LeaveRequestSummary):
     # A closed leave year can never be changed again, so the screen warns first.
     touches_closed_year: bool = False
     closed_year_names: list[str] = Field(default_factory=list)
+    can_curtail: bool = False
+    curtailments: list[CurtailmentRead] = Field(default_factory=list)
 
 
 class CheckProblem(SQLModel):

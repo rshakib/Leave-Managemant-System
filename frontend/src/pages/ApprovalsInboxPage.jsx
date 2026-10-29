@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Spinner, Tab, Table, Tabs } from 'react-bootstrap
 import { useNavigate } from 'react-router-dom'
 
 import api, { errorMessage } from '../api/client'
+import CurtailmentDecisionModal from '../components/CurtailmentDecisionModal'
 import DecisionModal from '../components/DecisionModal'
 import { useAutoRefresh } from '../hooks/useAutoRefresh.js'
 
@@ -19,11 +20,17 @@ export default function ApprovalsInboxPage() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [decision, setDecision] = useState(null)
+  const [curtailmentDecision, setCurtailmentDecision] = useState(null)
 
   const load = useCallback(async () => {
     try {
-      const { data } = await api.get('/approvals/inbox', { params: { status: tab } })
-      setItems(data)
+      if (tab === 'EARLY_RETURNS') {
+        const { data } = await api.get('/curtailments/inbox', { params: { status: 'PENDING' } })
+        setItems(data)
+      } else {
+        const { data } = await api.get('/approvals/inbox', { params: { status: tab } })
+        setItems(data)
+      }
       setError('')
     } catch (err) {
       setError(errorMessage(err, 'Could not load your inbox.'))
@@ -69,8 +76,9 @@ export default function ApprovalsInboxPage() {
       )}
 
       <Tabs activeKey={tab} onSelect={(key) => setTab(key ?? 'PENDING')} className="mb-3">
-        <Tab eventKey="PENDING" title="Pending" />
-        <Tab eventKey="DECIDED" title="Decided" />
+        <Tab eventKey="PENDING" title="Pending Requests" />
+        <Tab eventKey="EARLY_RETURNS" title="Early Returns" />
+        <Tab eventKey="DECIDED" title="Decided Requests" />
       </Tabs>
 
       {loading ? (
@@ -79,78 +87,140 @@ export default function ApprovalsInboxPage() {
         </div>
       ) : items.length === 0 ? (
         <div className="empty-state">
-          {tab === 'PENDING'
-            ? 'Nothing is waiting for you.'
-            : 'You have not decided on any requests yet.'}
+          {tab === 'EARLY_RETURNS'
+            ? 'No pending early return requests.'
+            : tab === 'PENDING'
+              ? 'Nothing is waiting for you.'
+              : 'You have not decided on any requests yet.'}
         </div>
       ) : (
         <Table striped bordered hover responsive>
           <thead>
-            <tr>
-              <th>Employee</th>
-              <th>Leave type</th>
-              <th>Dates</th>
-              <th className="text-end">Days</th>
-              <th>Submitted</th>
-              <th>Progress</th>
-              <th className="text-end">Actions</th>
-            </tr>
+            {tab === 'EARLY_RETURNS' ? (
+              <tr>
+                <th>Employee</th>
+                <th>Leave Type</th>
+                <th>Original End</th>
+                <th>New End Date</th>
+                <th className="text-end">Refunded Days</th>
+                <th>Reason</th>
+                <th>Submitted</th>
+                <th className="text-end">Actions</th>
+              </tr>
+            ) : (
+              <tr>
+                <th>Employee</th>
+                <th>Leave type</th>
+                <th>Dates</th>
+                <th className="text-end">Days</th>
+                <th>Submitted</th>
+                <th>Progress</th>
+                <th className="text-end">Actions</th>
+              </tr>
+            )}
           </thead>
           <tbody>
-            {items.map((item) => (
-              <tr key={item.approval_id}>
-                <td>
-                  {item.employee_name} ({item.employee_code})
-                </td>
-                <td>
-                  {item.leave_type_code} — {item.leave_type_name}
-                </td>
-                <td>
-                  {item.start_date} → {item.end_date}
-                  {item.day_type !== 'FULL_DAY' && (
-                    <div className="small text-muted">{item.day_type}</div>
-                  )}
-                </td>
-                <td className="text-end">{days(item.chargeable_days)}</td>
-                <td>{new Date(item.submitted_at).toLocaleString()}</td>
-                <td>
-                  <Badge bg="secondary">{item.summary}</Badge>
-                </td>
-                <td className="text-end">
-                  <Button
-                    size="sm"
-                    variant="outline-secondary"
-                    className="me-2"
-                    onClick={() => navigate(`/leave-requests/${item.request_id}`)}
-                  >
-                    View
-                  </Button>
-                  {tab === 'PENDING' && (
-                    <>
-                      <Button
-                        size="sm"
-                        variant="success"
-                        className="me-2"
-                        onClick={() =>
-                          setDecision({ action: 'approve', requestId: item.request_id })
-                        }
-                      >
-                        Approve
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() =>
-                          setDecision({ action: 'reject', requestId: item.request_id })
-                        }
-                      >
-                        Reject
-                      </Button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {items.map((item) =>
+              tab === 'EARLY_RETURNS' ? (
+                <tr key={item.id}>
+                  <td>
+                    {item.employee_name} ({item.employee_code})
+                  </td>
+                  <td>{item.leave_type_name}</td>
+                  <td>{item.original_end_date}</td>
+                  <td>
+                    <strong>{item.curtailed_end_date}</strong>
+                  </td>
+                  <td className="text-end">
+                    <Badge bg="success">+{days(item.days_to_refund)} days</Badge>
+                  </td>
+                  <td>{item.reason}</td>
+                  <td>{new Date(item.submitted_at).toLocaleString()}</td>
+                  <td className="text-end">
+                    <Button
+                      size="sm"
+                      variant="outline-secondary"
+                      className="me-2"
+                      onClick={() => navigate(`/leave-requests/${item.leave_request_id}`)}
+                    >
+                      View
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="success"
+                      className="me-2"
+                      onClick={() =>
+                        setCurtailmentDecision({ action: 'approve', curtailment: item })
+                      }
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() =>
+                        setCurtailmentDecision({ action: 'reject', curtailment: item })
+                      }
+                    >
+                      Reject
+                    </Button>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={item.approval_id}>
+                  <td>
+                    {item.employee_name} ({item.employee_code})
+                  </td>
+                  <td>
+                    {item.leave_type_code} — {item.leave_type_name}
+                  </td>
+                  <td>
+                    {item.start_date} → {item.end_date}
+                    {item.day_type !== 'FULL_DAY' && (
+                      <div className="small text-muted">{item.day_type}</div>
+                    )}
+                  </td>
+                  <td className="text-end">{days(item.chargeable_days)}</td>
+                  <td>{new Date(item.submitted_at).toLocaleString()}</td>
+                  <td>
+                    <Badge bg="secondary">{item.summary}</Badge>
+                  </td>
+                  <td className="text-end">
+                    <Button
+                      size="sm"
+                      variant="outline-secondary"
+                      className="me-2"
+                      onClick={() => navigate(`/leave-requests/${item.request_id}`)}
+                    >
+                      View
+                    </Button>
+                    {tab === 'PENDING' && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="success"
+                          className="me-2"
+                          onClick={() =>
+                            setDecision({ action: 'approve', requestId: item.request_id })
+                          }
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() =>
+                            setDecision({ action: 'reject', requestId: item.request_id })
+                          }
+                        >
+                          Reject
+                        </Button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              )
+            )}
           </tbody>
         </Table>
       )}
@@ -160,6 +230,14 @@ export default function ApprovalsInboxPage() {
         action={decision?.action}
         requestId={decision?.requestId}
         onHide={() => setDecision(null)}
+        onDecided={decided}
+      />
+
+      <CurtailmentDecisionModal
+        show={curtailmentDecision !== null}
+        action={curtailmentDecision?.action}
+        curtailment={curtailmentDecision?.curtailment}
+        onHide={() => setCurtailmentDecision(null)}
         onDecided={decided}
       />
     </>
