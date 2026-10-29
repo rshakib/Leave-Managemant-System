@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+  <body style="margin:0;padding:24px 12px;background:#f4f1ec;font-family:Arial,Helvetica,sans-serif;color:#131313;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;">
+      <tr>
+        <td style="background:#131313;padding:18px 24px;border-radius:10px 10px 0 0;">
+          <span style="font-size:17px;font-weight:bold;color:#ffffff;letter-spacing:.2px;">SOLshare</span>
+          <span style="font-size:12px;color:#a8a8a8;margin-left:8px;">Leave Management</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="height:4px;background:#cc3300;font-size:0;line-height:0;">&nbsp;</td>
+      </tr>
+      <tr>
+        <td style="background:#ffffff;border:1px solid #e6e0d6;border-top:0;border-radius:0 0 10px 10px;padding:26px 24px;">
+          <p style="margin:0 0 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#cc3300;font-weight:bold;">Not approved</p>
+          <h1 style="margin:0 0 10px;font-size:20px;line-height:1.3;">Your leave request was rejected</h1>
+          <p style="margin:0 0 18px;font-size:14px;line-height:1.6;color:#5f5f5f;">{{ actor_name }} rejected this request. The reserved days are back in your available balance.</p>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fbf8f1;border:1px solid #f0ece4;border-radius:8px;padding:6px;">
+            <tr>
+              <td style="padding:7px 0;font-size:13px;color:#8a8a8a;width:38%;vertical-align:top;">Rejected by</td>
+              <td style="padding:7px 0;font-size:13px;font-weight:bold;color:#131313;">{{ actor_name }}</td>
+            </tr>
+            <tr>
+              <td style="padding:7px 0;font-size:13px;color:#8a8a8a;width:38%;vertical-align:top;">Leave type</td>
+              <td style="padding:7px 0;font-size:13px;font-weight:bold;color:#131313;">{{ leave_type_name }} ({{ leave_type_code }})</td>
+            </tr>
+            <tr>
+              <td style="padding:7px 0;font-size:13px;color:#8a8a8a;width:38%;vertical-align:top;">Dates</td>
+              <td style="padding:7px 0;font-size:13px;font-weight:bold;color:#131313;">{{ start_date }} to {{ end_date }}</td>
+            </tr>
+            <tr>
+              <td style="padding:7px 0;font-size:13px;color:#8a8a8a;width:38%;vertical-align:top;">Chargeable days</td>
+              <td style="padding:7px 0;font-size:13px;font-weight:bold;color:#131313;">{{ chargeable_days }}</td>
+            </tr>
+            <tr>
+              <td style="padding:7px 0;font-size:13px;color:#8a8a8a;width:38%;vertical-align:top;">Comment</td>
+              <td style="padding:7px 0;font-size:13px;font-weight:bold;color:#131313;">{{ comment }}</td>
+            </tr>
+          </table>
+          <p style="margin:18px 0 6px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#8a8a8a;font-weight:bold;">Remaining balance</p>
+{% for balance in balances %}          <p style="margin:0 0 2px;font-size:13px;">{{ balance.leave_year_name }}: <strong>{{ balance.available }}</strong> day(s)</p>
+{% endfor %}
+          <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 6px;">
+            <tr>
+              <td style="background:#cc3300;border-radius:6px;">
+                <a href="{{ link }}" style="display:inline-block;padding:11px 22px;font-size:14px;font-weight:bold;color:#ffffff;text-decoration:none;">Open the request</a>
+              </td>
+            </tr>
+          </table>
+          <p style="margin:18px 0 0;font-size:12px;line-height:1.6;color:#a8a8a8;border-top:1px solid #f0ece4;padding-top:14px;">
+            This is an automated message from the SOLshare Leave Management System — please do not reply.
+          </p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

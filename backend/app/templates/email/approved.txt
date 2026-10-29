@@ -1,0 +1,14 @@
+Hello,
+
+Your leave request is fully approved.
+
+  Leave type : {{ leave_type_name }} ({{ leave_type_code }})
+  Dates      : {{ start_date }} to {{ end_date }}
+  Days       : {{ chargeable_days }}
+
+Remaining balance:
+{% for balance in balances %}  {{ balance.leave_year_name }}: {{ balance.available }} day(s)
+{% endfor %}
+Open it here: {{ link }}
+
+-- Leave Management System

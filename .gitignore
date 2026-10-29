@@ -1,0 +1,27 @@
+# Python
+backend/venv/
+__pycache__/
+
+# Environment files (never commit secrets)
+.env
+backend/.env
+# The throw-away demo configuration and the credentials it prints.
+backend/.env.demo
+backend/.env.demo.local
+backend/demo_credentials.txt
+
+# Email the FILE backend wrote locally
+backend/outbox_dev/
+
+# Uploaded leave attachments
+backend/media/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Graphify
+graphify-out/
+
+# Commandcode
+.commandcode/

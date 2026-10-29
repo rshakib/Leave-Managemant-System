@@ -1,0 +1,13 @@
+Hello,
+
+The leave request of {{ employee_name }} was cancelled.
+
+  Leave type : {{ leave_type_name }} ({{ leave_type_code }})
+  Dates      : {{ start_date }} to {{ end_date }}
+  Days       : {{ chargeable_days }}
+  Cancelled by: {{ cancelled_by_name }}
+  Reason     : {{ cancel_reason }}
+
+Open it here: {{ link }}
+
+-- Leave Management System

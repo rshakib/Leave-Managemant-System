@@ -1,0 +1,15 @@
+Hello,
+
+{{ actor_name }} rejected your leave request.
+
+  Leave type : {{ leave_type_name }} ({{ leave_type_code }})
+  Dates      : {{ start_date }} to {{ end_date }}
+  Days       : {{ chargeable_days }}
+  Comment    : {{ comment }}
+
+Restored balance:
+{% for balance in balances %}  {{ balance.leave_year_name }}: {{ balance.available }} day(s)
+{% endfor %}
+Open it here: {{ link }}
+
+-- Leave Management System

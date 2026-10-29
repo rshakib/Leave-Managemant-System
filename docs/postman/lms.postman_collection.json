@@ -1,0 +1,2157 @@
+{
+  "info": {
+    "name": "Leave Management System API",
+    "description": "Every route of the Leave Management System API (75 requests, 8 folders).\n\nHow to use it:\n1. Import this collection AND lms.postman_environment.json, then pick the environment.\n2. Fill in `email` and `password` in the environment.\n3. Run **Auth \u2192 POST /auth/login**. It saves `access_token` into the `token` variable for you, and Postman's cookie jar keeps the httpOnly refresh_token cookie.\n4. Every other request then works: they all send `Authorization: Bearer {{token}}`.\n\nWhen the access token expires (15 minutes) run **POST /auth/refresh** once \u2014 it returns a new token and rotates the cookie. If an access token is missing you get 401.\n\nPath variables such as :year_id default to 1: replace them with the real ids you created (the response body of each create request shows the id).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "email",
+      "value": "admin@example.invalid"
+    },
+    {
+      "key": "password",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "GET /health"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /health/db",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/db",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "db"
+              ]
+            },
+            "description": "GET /health/db"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /health/ready",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ]
+            },
+            "description": "GET /health/ready"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "POST /auth/change-password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/change-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "change-password"
+              ]
+            },
+            "description": "POST /auth/change-password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"{{password}}\",\n  \"new_password\": \"Zz-New-strong-pass1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body && body.access_token) {",
+                  "  pm.collectionVariables.set('token', body.access_token);",
+                  "  if (pm.environment.name) { pm.environment.set('token', body.access_token); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "POST /auth/login (form encoded, OAuth2 password flow).\n\nSends `email` + `password` from the environment. On success this request saves `access_token` into the `token` variable, and Postman stores the httpOnly `refresh_token` cookie in its cookie jar.\n\nA wrong password returns a generic 401; five wrong attempts from one IP return **429** with a `Retry-After` header.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "username",
+                  "value": "{{email}}",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "{{password}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body && body.access_token) {",
+                  "  pm.collectionVariables.set('token', body.access_token);",
+                  "  if (pm.environment.name) { pm.environment.set('token', body.access_token); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "POST /auth/logout"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /auth/logout-all",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout-all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout-all"
+              ]
+            },
+            "description": "POST /auth/logout-all"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /auth/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "description": "GET /auth/me"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /auth/refresh",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "POST /auth/refresh",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body && body.access_token) {",
+                  "  pm.collectionVariables.set('token', body.access_token);",
+                  "  if (pm.environment.name) { pm.environment.set('token', body.access_token); }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "GET /admin/audit-log",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/audit-log",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "audit-log"
+              ]
+            },
+            "description": "GET /admin/audit-log"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/audit-log/{entry_id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/audit-log/:entry_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "audit-log",
+                ":entry_id"
+              ],
+              "variable": [
+                {
+                  "key": "entry_id",
+                  "value": "1",
+                  "description": "replace with a real entry_id"
+                }
+              ]
+            },
+            "description": "GET /admin/audit-log/{entry_id}"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/emails",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/emails",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "emails"
+              ]
+            },
+            "description": "GET /admin/emails"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/emails/{email_id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/emails/:email_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "emails",
+                ":email_id"
+              ],
+              "variable": [
+                {
+                  "key": "email_id",
+                  "value": "1",
+                  "description": "replace with a real email_id"
+                }
+              ]
+            },
+            "description": "GET /admin/emails/{email_id}"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /admin/emails/{email_id}/retry",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/emails/:email_id/retry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "emails",
+                ":email_id",
+                "retry"
+              ],
+              "variable": [
+                {
+                  "key": "email_id",
+                  "value": "1",
+                  "description": "replace with a real email_id"
+                }
+              ]
+            },
+            "description": "POST /admin/emails/{email_id}/retry"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/login-attempts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/login-attempts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "login-attempts"
+              ]
+            },
+            "description": "GET /admin/login-attempts"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Organisation & people",
+      "item": [
+        {
+          "name": "GET /approver-assignments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approver-assignments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approver-assignments"
+              ]
+            },
+            "description": "GET /approver-assignments"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /approvers/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvers/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvers",
+                "me"
+              ]
+            },
+            "description": "GET /approvers/me"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /departments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/departments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "departments"
+              ]
+            },
+            "description": "GET /departments"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /departments",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/departments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "departments"
+              ]
+            },
+            "description": "POST /departments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"division_id\": 1,\n  \"name\": \"Administration\",\n  \"is_active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /departments/{department_id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/departments/:department_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "departments",
+                ":department_id"
+              ],
+              "variable": [
+                {
+                  "key": "department_id",
+                  "value": "1",
+                  "description": "replace with a real department_id"
+                }
+              ]
+            },
+            "description": "GET /departments/{department_id}"
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH /departments/{department_id}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/departments/:department_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "departments",
+                ":department_id"
+              ],
+              "variable": [
+                {
+                  "key": "department_id",
+                  "value": "1",
+                  "description": "replace with a real department_id"
+                }
+              ]
+            },
+            "description": "PATCH /departments/{department_id}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /divisions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/divisions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "divisions"
+              ]
+            },
+            "description": "GET /divisions"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /divisions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/divisions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "divisions"
+              ]
+            },
+            "description": "POST /divisions",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Head Office\",\n  \"is_active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /divisions/{division_id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/divisions/:division_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "divisions",
+                ":division_id"
+              ],
+              "variable": [
+                {
+                  "key": "division_id",
+                  "value": "1",
+                  "description": "replace with a real division_id"
+                }
+              ]
+            },
+            "description": "GET /divisions/{division_id}"
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH /divisions/{division_id}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/divisions/:division_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "divisions",
+                ":division_id"
+              ],
+              "variable": [
+                {
+                  "key": "division_id",
+                  "value": "1",
+                  "description": "replace with a real division_id"
+                }
+              ]
+            },
+            "description": "PATCH /divisions/{division_id}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Head Office (renamed)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /employees",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/employees",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees"
+              ]
+            },
+            "description": "GET /employees"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /employees",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees"
+              ]
+            },
+            "description": "POST /employees",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"employee_code\": \"E100\",\n  \"full_name\": \"Test Employee\",\n  \"email\": \"employee@example.invalid\",\n  \"password\": \"Zz-Strong-pass1\",\n  \"division_id\": 1,\n  \"department_id\": 1,\n  \"joining_date\": \"2026-01-01\",\n  \"roles\": [\n    \"EMPLOYEE\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /employees/{employee_id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/employees/:employee_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                ":employee_id"
+              ],
+              "variable": [
+                {
+                  "key": "employee_id",
+                  "value": "1",
+                  "description": "replace with a real employee_id"
+                }
+              ]
+            },
+            "description": "GET /employees/{employee_id}"
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH /employees/{employee_id}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/:employee_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                ":employee_id"
+              ],
+              "variable": [
+                {
+                  "key": "employee_id",
+                  "value": "1",
+                  "description": "replace with a real employee_id"
+                }
+              ]
+            },
+            "description": "PATCH /employees/{employee_id}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"designation\": \"Engineer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PUT /employees/{employee_id}/approvers",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/:employee_id/approvers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                ":employee_id",
+                "approvers"
+              ],
+              "variable": [
+                {
+                  "key": "employee_id",
+                  "value": "1",
+                  "description": "replace with a real employee_id"
+                }
+              ]
+            },
+            "description": "PUT /employees/{employee_id}/approvers",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approver_ids\": [\n    2\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Leave configuration",
+      "item": [
+        {
+          "name": "POST /leave-assignments",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-assignments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-assignments"
+              ]
+            },
+            "description": "POST /leave-assignments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"employee_id\": 1,\n  \"leave_type_id\": 1,\n  \"leave_year_id\": 1,\n  \"allocated_days\": \"20\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /leave-assignments/bulk",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-assignments/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-assignments",
+                "bulk"
+              ]
+            },
+            "description": "POST /leave-assignments/bulk",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"leave_type_ids\": [\n    1\n  ],\n  \"division_id\": 1,\n  \"allocated_days\": \"20\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-balance-adjustments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-balance-adjustments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-balance-adjustments"
+              ]
+            },
+            "description": "GET /leave-balance-adjustments"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-balances",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-balances",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-balances"
+              ]
+            },
+            "description": "GET /leave-balances"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-balances/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-balances/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-balances",
+                "me"
+              ]
+            },
+            "description": "GET /leave-balances/me"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-balances/me/adjustments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-balances/me/adjustments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-balances",
+                "me",
+                "adjustments"
+              ]
+            },
+            "description": "GET /leave-balances/me/adjustments"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /leave-balances/{balance_id}/adjust",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-balances/:balance_id/adjust",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-balances",
+                ":balance_id",
+                "adjust"
+              ],
+              "variable": [
+                {
+                  "key": "balance_id",
+                  "value": "1",
+                  "description": "replace with a real balance_id"
+                }
+              ]
+            },
+            "description": "POST /leave-balances/{balance_id}/adjust",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"field\": \"ALLOCATED\",\n  \"delta\": \"5\",\n  \"reason\": \"annual bonus days\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-types",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-types",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-types"
+              ]
+            },
+            "description": "GET /leave-types"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /leave-types",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-types",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-types"
+              ]
+            },
+            "description": "POST /leave-types",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"AL\",\n  \"name\": \"Annual Leave\",\n  \"default_quota\": \"20\",\n  \"allow_half_day\": true,\n  \"carry_forward_allowed\": true,\n  \"max_carry_forward_days\": \"5\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-types/{type_id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-types/:type_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-types",
+                ":type_id"
+              ],
+              "variable": [
+                {
+                  "key": "type_id",
+                  "value": "1",
+                  "description": "replace with a real type_id"
+                }
+              ]
+            },
+            "description": "GET /leave-types/{type_id}"
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH /leave-types/{type_id}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-types/:type_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-types",
+                ":type_id"
+              ],
+              "variable": [
+                {
+                  "key": "type_id",
+                  "value": "1",
+                  "description": "replace with a real type_id"
+                }
+              ]
+            },
+            "description": "PATCH /leave-types/{type_id}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Annual Leave\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-years",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-years",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-years"
+              ]
+            },
+            "description": "GET /leave-years"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /leave-years",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-years",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-years"
+              ]
+            },
+            "description": "POST /leave-years",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"2026\",\n  \"start_date\": \"2026-01-01\",\n  \"end_date\": \"2026-12-31\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-years/{year_id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-years/:year_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-years",
+                ":year_id"
+              ],
+              "variable": [
+                {
+                  "key": "year_id",
+                  "value": "1",
+                  "description": "replace with a real year_id"
+                }
+              ]
+            },
+            "description": "GET /leave-years/{year_id}"
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH /leave-years/{year_id}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-years/:year_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-years",
+                ":year_id"
+              ],
+              "variable": [
+                {
+                  "key": "year_id",
+                  "value": "1",
+                  "description": "replace with a real year_id"
+                }
+              ]
+            },
+            "description": "PATCH /leave-years/{year_id}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"2026\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /leave-years/{year_id}/activate",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-years/:year_id/activate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-years",
+                ":year_id",
+                "activate"
+              ],
+              "variable": [
+                {
+                  "key": "year_id",
+                  "value": "1",
+                  "description": "replace with a real year_id"
+                }
+              ]
+            },
+            "description": "POST /leave-years/{year_id}/activate"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-years/{year_id}/carry-forwards",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-years/:year_id/carry-forwards",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-years",
+                ":year_id",
+                "carry-forwards"
+              ],
+              "variable": [
+                {
+                  "key": "year_id",
+                  "value": "1",
+                  "description": "replace with a real year_id"
+                }
+              ]
+            },
+            "description": "GET /leave-years/{year_id}/carry-forwards"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /leave-years/{year_id}/close",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-years/:year_id/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-years",
+                ":year_id",
+                "close"
+              ],
+              "variable": [
+                {
+                  "key": "year_id",
+                  "value": "1",
+                  "description": "replace with a real year_id"
+                }
+              ]
+            },
+            "description": "POST /leave-years/{year_id}/close",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"confirm_name\": \"2025\",\n  \"expected_fingerprint\": {\n    \"rows\": 0,\n    \"total_carried\": \"0.00\",\n    \"total_forfeited\": \"0.00\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-years/{year_id}/closing-preview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-years/:year_id/closing-preview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-years",
+                ":year_id",
+                "closing-preview"
+              ],
+              "variable": [
+                {
+                  "key": "year_id",
+                  "value": "1",
+                  "description": "replace with a real year_id"
+                }
+              ]
+            },
+            "description": "GET /leave-years/{year_id}/closing-preview"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Calendar",
+      "item": [
+        {
+          "name": "GET /calendar/preview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/calendar/preview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendar",
+                "preview"
+              ]
+            },
+            "description": "GET /calendar/preview"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /holidays",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/holidays",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "holidays"
+              ]
+            },
+            "description": "GET /holidays"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /holidays",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/holidays",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "holidays"
+              ]
+            },
+            "description": "POST /holidays",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"leave_year_id\": 1,\n  \"date\": \"2026-03-03\",\n  \"title\": \"Holiday\",\n  \"type\": \"PUBLIC\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /holidays/import",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/holidays/import",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "holidays",
+                "import"
+              ]
+            },
+            "description": "POST /holidays/import"
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /holidays/{holiday_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/holidays/:holiday_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "holidays",
+                ":holiday_id"
+              ],
+              "variable": [
+                {
+                  "key": "holiday_id",
+                  "value": "1",
+                  "description": "replace with a real holiday_id"
+                }
+              ]
+            },
+            "description": "DELETE /holidays/{holiday_id}"
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH /holidays/{holiday_id}",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/holidays/:holiday_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "holidays",
+                ":holiday_id"
+              ],
+              "variable": [
+                {
+                  "key": "holiday_id",
+                  "value": "1",
+                  "description": "replace with a real holiday_id"
+                }
+              ]
+            },
+            "description": "PATCH /holidays/{holiday_id}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Holiday (renamed)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /weekends/employees",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/weekends/employees",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "weekends",
+                "employees"
+              ]
+            },
+            "description": "GET /weekends/employees"
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /weekends/employees/{employee_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/weekends/employees/:employee_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "weekends",
+                "employees",
+                ":employee_id"
+              ],
+              "variable": [
+                {
+                  "key": "employee_id",
+                  "value": "1",
+                  "description": "replace with a real employee_id"
+                }
+              ]
+            },
+            "description": "DELETE /weekends/employees/{employee_id}"
+          },
+          "response": []
+        },
+        {
+          "name": "PUT /weekends/employees/{employee_id}",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/weekends/employees/:employee_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "weekends",
+                "employees",
+                ":employee_id"
+              ],
+              "variable": [
+                {
+                  "key": "employee_id",
+                  "value": "1",
+                  "description": "replace with a real employee_id"
+                }
+              ]
+            },
+            "description": "PUT /weekends/employees/{employee_id}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"days_of_week\": [\n    5,\n    6\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /weekends/global",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/weekends/global",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "weekends",
+                "global"
+              ]
+            },
+            "description": "GET /weekends/global"
+          },
+          "response": []
+        },
+        {
+          "name": "PUT /weekends/global",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/weekends/global",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "weekends",
+                "global"
+              ]
+            },
+            "description": "PUT /weekends/global",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"days_of_week\": [\n    5,\n    6\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Leave requests & approvals",
+      "item": [
+        {
+          "name": "GET /approvals/inbox",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals/inbox",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals",
+                "inbox"
+              ]
+            },
+            "description": "GET /approvals/inbox"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /approvals/inbox/count",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals/inbox/count",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals",
+                "inbox",
+                "count"
+              ]
+            },
+            "description": "GET /approvals/inbox/count"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-requests"
+              ]
+            },
+            "description": "GET /leave-requests"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /leave-requests",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "multipart/form-data",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-requests"
+              ]
+            },
+            "description": "POST /leave-requests",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "leave_type_id",
+                  "value": "1",
+                  "type": "text"
+                },
+                {
+                  "key": "start_date",
+                  "value": "2026-05-04",
+                  "type": "text"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2026-05-05",
+                  "type": "text"
+                },
+                {
+                  "key": "day_type",
+                  "value": "FULL_DAY",
+                  "type": "text"
+                },
+                {
+                  "key": "reason",
+                  "value": "family trip",
+                  "type": "text"
+                },
+                {
+                  "key": "attachment",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-requests/check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-requests/check",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-requests",
+                "check"
+              ]
+            },
+            "description": "GET /leave-requests/check"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-requests/me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-requests/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-requests",
+                "me"
+              ]
+            },
+            "description": "GET /leave-requests/me"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-requests/{request_id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-requests/:request_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-requests",
+                ":request_id"
+              ],
+              "variable": [
+                {
+                  "key": "request_id",
+                  "value": "1",
+                  "description": "replace with a real request_id"
+                }
+              ]
+            },
+            "description": "GET /leave-requests/{request_id}"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /leave-requests/{request_id}/approve",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-requests/:request_id/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-requests",
+                ":request_id",
+                "approve"
+              ],
+              "variable": [
+                {
+                  "key": "request_id",
+                  "value": "1",
+                  "description": "replace with a real request_id"
+                }
+              ]
+            },
+            "description": "POST /leave-requests/{request_id}/approve",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"comment\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /leave-requests/{request_id}/attachment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/leave-requests/:request_id/attachment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-requests",
+                ":request_id",
+                "attachment"
+              ],
+              "variable": [
+                {
+                  "key": "request_id",
+                  "value": "1",
+                  "description": "replace with a real request_id"
+                }
+              ]
+            },
+            "description": "GET /leave-requests/{request_id}/attachment"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /leave-requests/{request_id}/cancel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-requests/:request_id/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-requests",
+                ":request_id",
+                "cancel"
+              ],
+              "variable": [
+                {
+                  "key": "request_id",
+                  "value": "1",
+                  "description": "replace with a real request_id"
+                }
+              ]
+            },
+            "description": "POST /leave-requests/{request_id}/cancel",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"comment\": \"changed my plans\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /leave-requests/{request_id}/reject",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-requests/:request_id/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-requests",
+                ":request_id",
+                "reject"
+              ],
+              "variable": [
+                {
+                  "key": "request_id",
+                  "value": "1",
+                  "description": "replace with a real request_id"
+                }
+              ]
+            },
+            "description": "POST /leave-requests/{request_id}/reject",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"comment\": \"busy season\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Reports",
+      "item": [
+        {
+          "name": "GET /reports/balances",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/balances",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "balances"
+              ]
+            },
+            "description": "GET /reports/balances"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /reports/balances/export",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/balances/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "balances",
+                "export"
+              ]
+            },
+            "description": "GET /reports/balances/export"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /reports/history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "history"
+              ]
+            },
+            "description": "GET /reports/history"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /reports/history/export",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/history/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "history",
+                "export"
+              ]
+            },
+            "description": "GET /reports/history/export"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

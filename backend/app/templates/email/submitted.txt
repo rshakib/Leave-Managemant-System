@@ -1,0 +1,15 @@
+Hello,
+
+{{ employee_name }} has submitted a leave request.
+
+  Leave type : {{ leave_type_name }} ({{ leave_type_code }})
+  Dates      : {{ start_date }} to {{ end_date }}
+  Day type   : {{ day_type }}
+  Days       : {{ chargeable_days }}
+  Approvers  : {{ approver_count }}
+  Reason     : {{ reason_short }}
+
+Open it here: {{ link }}
+
+You are receiving this because you are an approver for {{ employee_name }}.
+-- Leave Management System

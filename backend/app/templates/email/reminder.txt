@@ -1,0 +1,10 @@
+Hello {{ approver_name }},
+
+{{ count }} leave request(s) have been waiting for your decision for more than
+2 working days:
+
+{% for item in overdue %}  - {{ item.employee_name }}: {{ item.leave_type_code }}, {{ item.start_date }} to {{ item.end_date }} ({{ item.days }} day(s), waiting {{ item.waiting }} working day(s))
+{% endfor %}
+Open your inbox: {{ link }}
+
+-- Leave Management System

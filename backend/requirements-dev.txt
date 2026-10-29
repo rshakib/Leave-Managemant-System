@@ -1,0 +1,4 @@
+# Development/test-only dependencies (not needed to run the app).
+pytest==9.0.1
+aiosmtpd==1.4.6
+httpx==0.28.1

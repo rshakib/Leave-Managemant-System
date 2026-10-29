@@ -1,0 +1,71 @@
+"""Which write routes are audited, and which are exempt on purpose.
+
+`tests/test_audit_coverage.py` walks the real routes and fails when:
+
+* a POST/PUT/PATCH/DELETE route is missing here, or
+* a key here names a route that no longer exists, or
+* an "exempt" entry has no reason.
+
+So adding a new write endpoint forces a decision: audit it, or write down why
+not. That is the point of a coverage test — it guards a RULE, not an outcome.
+"""
+
+AUDITED = "audited"
+
+AUDIT_REGISTRY: dict[str, str] = {
+    # --- divisions & departments -------------------------------------------
+    "POST /divisions": AUDITED,
+    "DELETE /divisions/{division_id}": AUDITED,
+    "PATCH /divisions/{division_id}": AUDITED,
+    "POST /departments": AUDITED,
+    "DELETE /departments/{department_id}": AUDITED,
+    "PATCH /departments/{department_id}": AUDITED,
+    # --- employees & approvers ---------------------------------------------
+    "POST /employees": AUDITED,
+    "PATCH /employees/{employee_id}": AUDITED,
+    "PUT /employees/{employee_id}/approvers": AUDITED,
+    # --- leave years, leave types, closing ---------------------------------
+    "POST /leave-years": AUDITED,
+    "PATCH /leave-years/{year_id}": AUDITED,
+    "POST /leave-years/{year_id}/activate": AUDITED,
+    "POST /leave-years/{year_id}/close": AUDITED,
+    "POST /leave-types": AUDITED,
+    "PATCH /leave-types/{type_id}": AUDITED,
+    # --- assignments & balances ---------------------------------------------
+    "POST /leave-assignments": AUDITED,
+    "DELETE /leave-assignments/{balance_id}": AUDITED,
+    "POST /leave-balances/{balance_id}/adjust": AUDITED,
+    "POST /leave-assignments/bulk": AUDITED,
+    # --- calendar ----------------------------------------------------------
+    "PUT /weekends/global": AUDITED,
+    "PUT /weekends/employees/{employee_id}": AUDITED,
+    "DELETE /weekends/employees/{employee_id}": AUDITED,
+    "POST /holidays": AUDITED,
+    "PATCH /holidays/{holiday_id}": AUDITED,
+    "DELETE /holidays/{holiday_id}": AUDITED,
+    "POST /holidays/import": AUDITED,
+    # --- leave requests & approvals ----------------------------------------
+    "POST /leave-requests": AUDITED,
+    "POST /leave-requests/{request_id}/approve": AUDITED,
+    "POST /leave-requests/{request_id}/reject": AUDITED,
+    "POST /leave-requests/{request_id}/cancel": AUDITED,
+    # --- deliberately NOT audited ------------------------------------------
+    # Runs the outbox worker for one pass: a system action, no data change.
+    "POST /admin/emails/process-queue": (
+        "exempt: runs the email worker once; a system action, not a data change (D-148)."
+    ),
+    "POST /auth/login": AUDITED,
+    "POST /auth/refresh": AUDITED,
+    "POST /auth/logout": (
+        "exempt: ending one session touches no business data and leaves no row "
+        "worth auditing (the refresh token is simply marked revoked)"
+    ),
+    "POST /auth/logout-all": AUDITED,
+    "POST /auth/change-password": AUDITED,
+    # Ending one device writes a SESSION_REVOKED row in services/sessions.py.
+    "DELETE /auth/sessions/{session_id}": AUDITED,
+    "POST /admin/emails/{email_id}/retry": (
+        "exempt: a delivery retry is a SYSTEM action, already recorded on the "
+        "email row and in email_attempt (DECISIONS D-148)"
+    ),
+}
