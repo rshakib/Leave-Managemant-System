@@ -1,14 +1,4 @@
-"""The outbox worker: sends queued emails and enqueues reminder digests.
-
-Run it with:
-
-    python -m app.worker            # forever
-    python -m app.worker --once     # one pass (used by tests)
-
-Why `SELECT ... FOR UPDATE SKIP LOCKED`? Each worker locks the rows it is about
-to send and *skips* rows another worker already locked. Two workers therefore
-never grab the same email, and neither has to wait for the other.
-"""
+"""Background outbox email worker and periodic maintenance runner."""
 
 import argparse
 import asyncio
@@ -50,19 +40,12 @@ from app.services.notifications import enqueue_events
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("worker")
 
-# NOTE: this worker is a SYSTEM actor — it sends emails and queues reminders, so
-# it writes NO audit rows. The audit trail records what PEOPLE did; a delivery
-# retry is visible in email_attempt instead (DECISIONS D-148).
-
 BATCH_SIZE = 10
 IDLE_SECONDS = 5
 STUCK_AFTER = datetime.timedelta(minutes=10)
 REMINDER_EVERY_SECONDS = 15 * 60
 CLEANUP_EVERY_SECONDS = 24 * 60 * 60
 SUBTRACTED_TYPES = (HolidayType.PUBLIC, HolidayType.COMPANY)
-
-
-# --- sending ---------------------------------------------------------------
 
 
 async def _claim_batch() -> list[dict]:
@@ -147,8 +130,14 @@ async def _mark_failed(
 
 
 async def _deliver(item: dict) -> None:
-    """Render and send ONE row. A failure here never stops the worker."""
     backend = settings.email_backend.lower()
+    if item.get("event_type") == "REMINDER" and not settings.enable_approval_reminders:
+        logger.info(
+            "Suppressed sending outbox #%s (REMINDER): approval reminders are disabled.",
+            item.get("id"),
+        )
+        await _mark_sent(item["id"], "suppressed")
+        return
     try:
         subject, text, html = render_email(
             item["event_type"], item["payload"], settings.frontend_base_url
@@ -160,7 +149,7 @@ async def _deliver(item: dict) -> None:
         )
         await _mark_sent(item["id"], used)
         logger.info("sent outbox #%s (%s)", item["id"], item["event_type"])
-    except Exception as exc:  # noqa: BLE001 - a bad row only fails itself
+    except Exception as exc:  # noqa: BLE001
         logger.warning("outbox #%s failed: %s", item["id"], type(exc).__name__)
         await _mark_failed(
             item["id"], str(exc), item["attempts"], item["max_attempts"], backend
@@ -175,7 +164,6 @@ async def drain_once() -> int:
 
 
 async def recover_stuck() -> int:
-    """Rows left in SENDING by a crashed worker go back to PENDING."""
     cutoff = datetime.datetime.now(datetime.timezone.utc) - STUCK_AFTER
     async with async_session_factory() as session:
         result = await session.execute(
@@ -188,9 +176,6 @@ async def recover_stuck() -> int:
         )
         await session.commit()
         return result.rowcount or 0
-
-
-# --- reminders -------------------------------------------------------------
 
 
 def _weekend_for(employee_id: int, overrides: dict, global_days) -> set[int]:
@@ -211,7 +196,13 @@ def _holiday_applies(holiday: Holiday, employee: Employee) -> bool:
 
 
 async def reminder_tick() -> int:
-    """Enqueue ONE digest per overdue approver per local date."""
+    if not settings.enable_approval_reminders:
+        logger.info(
+            "Approval reminder tick skipped: approval reminders are disabled "
+            "(enable_approval_reminders=False)."
+        )
+        return 0
+
     today = datetime.datetime.now(zoneinfo.ZoneInfo(settings.org_timezone)).date()
     queued = 0
 
@@ -348,14 +339,6 @@ async def reminder_tick() -> int:
 
 
 async def cleanup_tick():
-    """Prune old telemetry/emails ONCE per day.
-
-    An ADVISORY LOCK is a lock the DATABASE holds for us by name: the first
-    worker calls `pg_try_advisory_lock(key)` and gets `true`; any other worker
-    asking for the same key gets `false`, so only one of them runs the cleanup.
-    Nothing is written to a table to remember this — the lock disappears by
-    itself when the session ends, which is exactly what we want.
-    """
     if not await try_cleanup_lock():
         logger.info("cleanup: another worker is already doing it")
         return None
@@ -365,9 +348,6 @@ async def cleanup_tick():
         await release_cleanup_lock()
     logger.info("cleanup pruned: %s", counts)
     return counts
-
-
-# --- loop ------------------------------------------------------------------
 
 
 async def run(once: bool) -> None:

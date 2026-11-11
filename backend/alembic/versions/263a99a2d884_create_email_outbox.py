@@ -3,9 +3,6 @@
 Revision ID: 263a99a2d884
 Revises: 92beb3d954d2
 Create Date: 2026-10-25 17:39:46.311245
-
-Creates the transactional outbox (`email_outbox`) and its attempt log
-(`email_attempt`) for FR-NOT-1/2, and enables Row Level Security on both.
 """
 from typing import Sequence, Union
 

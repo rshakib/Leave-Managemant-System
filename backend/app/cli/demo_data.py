@@ -1,15 +1,4 @@
-"""Fill a THROW-AWAY demo database with a believable fictional company (Task 2b).
-
-    LMS_ENV_FILE=.env.demo python -m app.cli.demo_data --i-understand-this-is-a-demo-database
-
-Everything is created through the application's OWN HTTP API (in-process, no server
-needed), so audit rows, balances, approver rules, outbox rows and the reconcile
-invariants are produced exactly as they are in real use. There is no raw SQL insert
-anywhere in this file.
-
-It is idempotent: every object is looked up (by code or name) before it is created,
-so running it twice changes nothing.
-"""
+"""Populate a demo database via the in-process ASGI API."""
 
 from __future__ import annotations
 
@@ -29,29 +18,17 @@ import httpx
 BACKEND_DIR = pathlib.Path(__file__).resolve().parents[2]
 CREDENTIALS_FILE = BACKEND_DIR / "demo_credentials.txt"
 DEMO_PREFIX = "DEMO-"
-# Every demo address must pass the API's own e-mail validation (EmailStr), which
-# REFUSES the reserved ".invalid" TLD. This subdomain of the reserved
-# documentation domain can never be a real inbox, so nothing is ever delivered
-# to a real person (and the demo sends mail to Mailpit, never to the internet).
 EMAIL_DOMAIN = "demo.example.com"
 FLAG = "--i-understand-this-is-a-demo-database"
 REMOTE_FLAG = "--allow-remote-demo-database"
-# Writing demo rows into a database that is already in use means its append-only
-# audit log carries that activity FOR EVER (D-147). So it needs a flag that says
-# exactly that, rather than happening by accident.
 REAL_DB_FLAG = "--allow-real-database"
 
 
 class DemoError(RuntimeError):
-    """A guard refused, or the API answered with something unexpected."""
+    pass
 
-
-# --------------------------------------------------------------------------
-# Guards — pure helpers so they can be unit-tested without a database.
-# --------------------------------------------------------------------------
 
 def database_name(database_url: str) -> str:
-    """The database NAME from a URL. Never returns user, password or host."""
     tail = (database_url or "").split("?", 1)[0].rstrip("/")
     if "/" not in tail:
         return ""
@@ -59,14 +36,6 @@ def database_name(database_url: str) -> str:
 
 
 def guard_environment(acknowledged: bool) -> None:
-    """The one guard that needs no database: an explicit acknowledgement.
-
-    There is no LMS_ENV_FILE requirement any more (D-204) — the project uses one
-    configured database. The real protection is the DATA check further down
-    (`guard_not_a_development_database`): a database that already holds employees
-    outside the DEMO- range is refused, so this can never fill a real database
-    with fictional people.
-    """
     if not acknowledged:
         raise DemoError(
             f"refusing to run: pass {FLAG} to confirm this is a demo database."
@@ -91,13 +60,6 @@ def guard_database_name(name: str, allow_remote: bool) -> None:
 
 
 def guard_not_a_development_database(employees: list[dict], *, allow_real: bool = False) -> None:
-    """At most ONE employee may be outside the DEMO- range (the seeded admin).
-
-    `allow_real=True` (the --allow-real-database flag) accepts a database that is
-    already in use, because someone may deliberately want demo rows there. The
-    audit log is append-only, so those rows stay: that is why it is a flag and not
-    the default (D-205).
-    """
     if allow_real:
         return
     outside = [e for e in employees if not str(e.get("employee_code", "")).startswith(DEMO_PREFIX)]
@@ -110,17 +72,14 @@ def guard_not_a_development_database(employees: list[dict], *, allow_real: bool 
 
 
 def demo_emails() -> dict[str, str]:
-    """employee code -> demo e-mail address."""
     return {code: f"{code.lower().replace('-', '.')}@{EMAIL_DOMAIN}" for code, *_ in PEOPLE}
 
 
 def make_password() -> str:
-    """One shared, policy-friendly random password for the demo employees."""
     return f"Demo-{secrets.token_urlsafe(12)}-9Aa"
 
 
 def sample_pdf(label: str) -> bytes:
-    """A tiny, clearly-labelled sample PDF (never a real document)."""
     text = f"SAMPLE DOCUMENT - demo data only - {label}"
     return (
         b"%PDF-1.4\n"
@@ -135,14 +94,6 @@ def sample_pdf(label: str) -> bytes:
         b"trailer<</Root 1 0 R>>\n%%EOF\n"
     )
 
-
-# --------------------------------------------------------------------------
-# The shared demo password and the credentials file (D-187)
-#
-# The password is generated ONCE and recorded. A later run must NOT invent a new
-# one: the demo employees already exist with the recorded password, so a fresh
-# value would fail every one of their logins (401) and burn the login rate limit.
-# --------------------------------------------------------------------------
 
 FILE_OK = "ok"
 FILE_MISSING = "missing"
@@ -164,11 +115,6 @@ CREDENTIALS_HELP = (
 
 
 def parse_credentials_file(text: str | None, expected: dict[str, str]) -> tuple[str, str | None]:
-    """(state, shared password) for the recorded demo credentials.
-
-    `expected` maps employee code -> e-mail. The file counts as usable only when it
-    carries the shared password AND one correct line for every demo employee.
-    """
     if text is None:
         return FILE_MISSING, None
 
@@ -178,7 +124,6 @@ def parse_credentials_file(text: str | None, expected: dict[str, str]) -> tuple[
         line = line.strip()
         if line.startswith(SHARED_PREFIX):
             if shared is not None:
-                # Two shared-password lines make the file ambiguous: never guess.
                 return FILE_BROKEN, None
             shared = line.split(":", 1)[1].strip() if ":" in line else ""
         elif line and not line.startswith("#") and line != CREDENTIALS_HEADER:
@@ -198,7 +143,6 @@ def parse_credentials_file(text: str | None, expected: dict[str, str]) -> tuple[
 
 
 def read_credentials_file(expected: dict[str, str], path: pathlib.Path | None = None):
-    """Read the credentials file from disk. Never returns the file's text."""
     file = path or CREDENTIALS_FILE
     try:
         text = file.read_text()
@@ -211,13 +155,6 @@ def read_credentials_file(expected: dict[str, str], path: pathlib.Path | None = 
 
 def decide_credential_action(file_state: str, demo_employees_exist: bool,
                              can_reset: bool) -> str:
-    """REUSE the recorded password, RESET it, CREATE a first one, or STOP.
-
-    * no demo employees yet          -> CREATE (nothing to be inconsistent with)
-    * employees exist, file usable   -> REUSE (they already have that password)
-    * employees exist, file unusable -> RESET through the admin reset API
-    * employees exist, cannot reset  -> STOP (never guess, never retry)
-    """
     if not demo_employees_exist:
         return CREATE_PASSWORD
     if file_state == FILE_OK:
@@ -225,16 +162,12 @@ def decide_credential_action(file_state: str, demo_employees_exist: bool,
     return RESET_PASSWORDS if can_reset else STOP
 
 
-# --------------------------------------------------------------------------
-# A tiny HTTP session, used to speak to the app in-process.
-# --------------------------------------------------------------------------
-
 class RateLimited(DemoError):
-    """The API answered 429: stop immediately, never retry in a loop."""
+    pass
 
 
 class LoginRefused(DemoError):
-    """A sign-in was refused with 401: stop immediately, never retry in a loop."""
+    pass
 
 
 class Session:
@@ -250,7 +183,6 @@ class Session:
             self.client.headers.pop("Authorization", None)
 
     async def call(self, method: str, path: str, *, expect=(200, 201), **kwargs):
-        # `actor` is only used to name the account in an error message.
         actor = kwargs.pop("actor", None)
         response = await self.client.request(method, path, **kwargs)
         if response.status_code == 429:
@@ -285,7 +217,6 @@ class Session:
         return token
 
     async def as_employee(self, email: str, password: str) -> None:
-        """Log in once per e-mail and reuse the token (fewer logins, no rate limit hit)."""
         token = self._tokens.get(email)
         if token is None:
             token = await self.login(email, password, actor="a demo employee")
@@ -295,10 +226,6 @@ class Session:
     def as_admin(self, token: str) -> None:
         self._headers(token)
 
-
-# --------------------------------------------------------------------------
-# Small lookups (idempotency)
-# --------------------------------------------------------------------------
 
 async def find(client: Session, path: str, **params):
     payload = await client.call("GET", path, expect=(200,), params=params or None)
@@ -337,10 +264,6 @@ async def ensure_leave_type(client: Session, **wanted) -> dict:
     return await client.call("POST", "/leave-types", json=wanted)
 
 
-# --------------------------------------------------------------------------
-# Calendar: dates are ALWAYS asked from the API, never guessed (D-72 / D-75).
-# --------------------------------------------------------------------------
-
 WORKING_KINDS = {"WORKING", "WORKING_DAY", "WORKDAY", "CHARGEABLE"}
 NON_WORKING_KINDS = {"WEEKEND", "HOLIDAY", "NON_WORKING", "OFF", "LEAVE"}
 
@@ -360,7 +283,6 @@ def _day_is_working(day: dict) -> bool | None:
 
 
 def parse_preview(payload) -> dict[str, bool]:
-    """{date -> works?} from whatever shape /calendar/preview returns."""
     days = None
     if isinstance(payload, dict):
         for key in ("days", "items", "dates", "calendar", "results"):
@@ -408,7 +330,6 @@ async def would_be_accepted(client: Session, leave_type_id: int, start, end, day
 
 async def find_window(client: Session, leave_type_id: int, working_days: int, *, day_type="FULL_DAY",
                       earliest: datetime.date | None = None, latest_span: int = 75):
-    """A span that contains exactly `working_days` chargeable days and is accepted."""
     today = await today_in_org_timezone(client)
     cursor = earliest or (today + datetime.timedelta(days=3))
     for offset in range(latest_span):
@@ -420,7 +341,6 @@ async def find_window(client: Session, leave_type_id: int, working_days: int, *,
             continue
         end = datetime.date.fromisoformat(inside[working_days - 1])
         if day_type != "FULL_DAY":
-            # a half-day is one single working day
             start = datetime.date.fromisoformat(inside[0])
             end = start
         check = await would_be_accepted(client, leave_type_id, start, end, day_type)
@@ -430,7 +350,6 @@ async def find_window(client: Session, leave_type_id: int, working_days: int, *,
 
 
 async def cross_month_window(client: Session, leave_type_id: int, needed: int = 2):
-    """A window of `needed` working days that ends in the NEXT month."""
     today = await today_in_org_timezone(client)
     month_end = (today.replace(day=28) + datetime.timedelta(days=4)).replace(day=1) - datetime.timedelta(days=1)
     while month_end <= today + datetime.timedelta(days=2):
@@ -452,10 +371,6 @@ async def today_in_org_timezone(client: Session) -> datetime.date:
 
     return datetime.datetime.now(ZoneInfo(settings.org_timezone)).date()
 
-
-# --------------------------------------------------------------------------
-# The demo company
-# --------------------------------------------------------------------------
 
 DIVISIONS = ["Operations", "Corporate Services"]
 DEPARTMENTS = {
@@ -483,15 +398,15 @@ SUPERVISORS = {
 }
 
 APPROVERS = {
-    "DEMO-002": ["DEMO-001", "DEMO-004"],   # two approvers, all must approve
+    "DEMO-002": ["DEMO-001", "DEMO-004"],
     "DEMO-003": ["DEMO-001"],
     "DEMO-004": ["DEMO-001"],
     "DEMO-005": ["DEMO-004"],
-    "DEMO-006": ["DEMO-003", "DEMO-001"],   # two approvers
+    "DEMO-006": ["DEMO-003", "DEMO-001"],
     "DEMO-007": ["DEMO-002"],
     "DEMO-008": ["DEMO-004"],
     "DEMO-009": ["DEMO-005"],
-    "DEMO-010": ["DEMO-001"],               # the head approves for the team
+    "DEMO-010": ["DEMO-001"],
 }
 
 HOLIDAYS = [
@@ -544,18 +459,15 @@ async def ensure_holidays(client: Session, year_id: int, year: int) -> int:
 
 
 def approver_codes() -> set[str]:
-    """Everyone who approves for somebody needs the APPROVER role (D-151)."""
     return {code for codes in APPROVERS.values() for code in codes}
 
 
 def roles_for(code: str) -> list[str]:
-    """The full role list for a demo employee (EMPLOYEE is always included, D-152)."""
     extra = next((row[6] for row in PEOPLE if row[0] == code), [])
     return ["EMPLOYEE", *sorted(set(extra) | ({"APPROVER"} if code in approver_codes() else set()))]
 
 
 def _approver_ids_of(row: dict) -> set:
-    """Approver ids from one /approver-assignments row (shape-tolerant)."""
     for key in ("approver_ids", "approvers"):
         value = row.get(key)
         if isinstance(value, list):
@@ -585,8 +497,6 @@ async def ensure_employees(client: Session, password: str, divisions: dict, depa
                 "department_id": departments[department]["id"],
                 "joining_date": f"{joined}-06-01",
                 "roles": roles_for(code),
-                # The shared demo password is handed over in demo_credentials.txt, so
-                # these accounts must NOT be forced into a password change (D-190).
                 "must_change_password": False,
             },
         )
@@ -597,8 +507,6 @@ async def ensure_employees(client: Session, password: str, divisions: dict, depa
         employee = by_code.get(code)
         if not employee:
             continue
-        # The LIST may not carry supervisor_id, so ask for the full row: a needless
-        # PATCH would write an audit row on every run (audit rows are permanent).
         detail = await client.call("GET", f"/employees/{employee['id']}", expect=(200,))
         wanted = by_code[supervisor]["id"]
         if detail.get("supervisor_id") != wanted:
@@ -612,7 +520,6 @@ async def ensure_employees(client: Session, password: str, divisions: dict, depa
         ids = [by_code[approver]["id"] for approver in approvers]
         employee_id = by_code[code]["id"]
         if current.get(employee_id) == set(ids):
-            # Already exactly right: a PUT would only add an audit row.
             unchanged += 1
             continue
         await client.call("PUT", f"/employees/{employee_id}/approvers", json={"approver_ids": ids})
@@ -653,10 +560,6 @@ async def ensure_assignments(client: Session, by_code: dict, types: dict, year_i
     return created
 
 
-# --------------------------------------------------------------------------
-# Requests, made by logging in as each demo employee
-# --------------------------------------------------------------------------
-
 async def submit(client: Session, email: str, password: str, leave_type_id: int, start, end,
                  *, day_type="FULL_DAY", reason="demo request", attachment: bytes | None = None) -> dict:
     await client.as_employee(email, password)
@@ -684,9 +587,6 @@ async def approve_all(client: Session, request_id: int, approver_emails: list[tu
 
 
 async def has_any_request(client: Session, admin_token: str, employee_id: int) -> bool:
-    """Does this employee already have a request? Asked as the ADMIN, so a second
-    run does not have to sign in as every demo employee (fewer logins, and no
-    audit row for a login that only performs a check)."""
     client.as_admin(admin_token)
     return bool(await find(client, "/leave-requests", employee_id=employee_id))
 
@@ -702,7 +602,6 @@ async def build_requests(client: Session, password: str, by_code: dict, types: d
     async def fresh(code: str):
         return await has_any_request(client, admin_token, by_code[code]["id"])
 
-    # 1. two plain PENDING requests
     for code, needed in (("DEMO-002", 3), ("DEMO-007", 2)):
         if await fresh(code):
             continue
@@ -712,7 +611,6 @@ async def build_requests(client: Session, password: str, by_code: dict, types: d
                      reason="Family function (demo)")
         made["pending"] += 1
 
-    # 2. an APPROVED half-day (one approver)
     if not await fresh("DEMO-005"):
         await client.as_employee(emails["DEMO-005"], password)
         start, _ = await find_window(client, types["AL"]["id"], 1, day_type="FIRST_HALF")
@@ -722,7 +620,6 @@ async def build_requests(client: Session, password: str, by_code: dict, types: d
         made["approved"] += 1
         made["half_day"] += 1
 
-    # 3. an APPROVED cross-month request (two approvers, both must agree)
     if not await fresh("DEMO-006"):
         await client.as_employee(emails["DEMO-006"], password)
         start, end = await cross_month_window(client, types["AL"]["id"], 2)
@@ -733,7 +630,6 @@ async def build_requests(client: Session, password: str, by_code: dict, types: d
             made["approved"] += 1
             made["cross_month"] += 1
 
-    # 4. a REJECTED request with a reason
     if not await fresh("DEMO-003"):
         await client.as_employee(emails["DEMO-003"], password)
         start, end = await find_window(client, types["SL"]["id"], 2)
@@ -744,7 +640,6 @@ async def build_requests(client: Session, password: str, by_code: dict, types: d
                           json={"comment": "Critical maintenance window that week (demo)"})
         made["rejected"] += 1
 
-    # 5. a CANCELLED request (employee cancels while pending)
     if not await fresh("DEMO-009"):
         await client.as_employee(emails["DEMO-009"], password)
         start, end = await find_window(client, types["AL"]["id"], 1)
@@ -754,7 +649,6 @@ async def build_requests(client: Session, password: str, by_code: dict, types: d
                           json={"comment": "No longer needed (demo)"})
         made["cancelled"] += 1
 
-    # 6. a PENDING request that carries a small sample PDF
     if not await fresh("DEMO-008"):
         await client.as_employee(emails["DEMO-008"], password)
         start, end = await find_window(client, types["AL"]["id"], 2)
@@ -764,7 +658,6 @@ async def build_requests(client: Session, password: str, by_code: dict, types: d
         made["with_attachment"] += 1
         made["pending"] += 1
 
-    # 7. an APPROVED request that spans a holiday (fewer chargeable than calendar days)
     if not await fresh("DEMO-010"):
         await client.as_employee(emails["DEMO-010"], password)
         holiday_dates = sorted(
@@ -790,7 +683,6 @@ async def ensure_adjustment(client: Session, admin_token: str, by_code: dict, ty
                           leave_type_id=types["AL"]["id"], leave_year_id=year_id)
     if not balances:
         return 0
-    # Idempotency: only add the example when this balance has no adjustment yet.
     history = await find(client, "/leave-balance-adjustments", employee_id=employee["id"],
                          leave_type_id=types["AL"]["id"], leave_year_id=year_id)
     if history:
@@ -802,10 +694,6 @@ async def ensure_adjustment(client: Session, admin_token: str, by_code: dict, ty
     )
     return 1
 
-
-# --------------------------------------------------------------------------
-# Credentials file, worker drain, main
-# --------------------------------------------------------------------------
 
 def write_credentials(credentials: dict[str, dict], password: str) -> None:
     lines = [
@@ -819,7 +707,6 @@ def write_credentials(credentials: dict[str, dict], password: str) -> None:
     ]
     for code, data in sorted(credentials.items()):
         lines.append(f"{code},{data['email']},{'/'.join(data['roles'])},{password}")
-    # 0o600: only your user can read it, and it is git-ignored.
     handle = os.open(CREDENTIALS_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(handle, "w") as file:
         file.write("\n".join(lines) + "\n")
@@ -827,7 +714,6 @@ def write_credentials(credentials: dict[str, dict], password: str) -> None:
 
 
 async def reset_demo_passwords(client: Session, employees: dict[str, dict], password: str) -> int:
-    """Set one fresh shared password through the admin's own reset API (no SQL)."""
     for employee in employees.values():
         await client.call(
             "PATCH", f"/employees/{employee['id']}", json={"password": password}
@@ -854,7 +740,6 @@ async def run(allow_remote: bool, allow_real: bool = False) -> int:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://demo.local") as raw:
         client = Session(raw, "demo")
-        # Guard 5 needs the database, so it runs before anything is created.
         admin_token = await client.login(
             settings_demo_email(), settings_demo_password()
         )
@@ -960,8 +845,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        # Nothing is imported from app.core.config until these pass, so a missing
-        # switch means the default backend/.env is never opened at all.
+        # Defer config import so the default .env isn't loaded without confirmation.
         guard_environment(args.acknowledged)
     except DemoError as error:
         print(f"Refused: {error}")

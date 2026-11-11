@@ -1,24 +1,4 @@
-"""Recording one audit row inside the caller's transaction (NFR-1).
-
-Two rules:
-
-1. **One row per business action.** Not one per field: a reader should see
-   "employee 42 was updated, email changed from A to B" as a single event.
-
-2. **FAIL CLOSED.** `record()` never commits and never swallows an error: it
-   INSERTs into the caller's transaction, so if the audit row cannot be written
-   the whole business action rolls back. That is the *opposite* of the email
-   outbox (DECISIONS D-110), on purpose:
-
-   * a leave decision without its email is a delayed notification — annoying,
-     fixable, and the business fact (the leave is approved) is still true;
-   * a leave decision without its audit row is an **unaccountable** change — the
-     balance moved and nobody can say who did it. That is worse than refusing
-     the change, so we refuse the change.
-
-The failed action leaves nothing behind: no business row, no audit row, because
-both live in the same transaction and are rolled back together.
-"""
+"""Transactional audit logging."""
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,11 +14,7 @@ MAX_REASON = 1000
 
 
 def snapshot(instance, fields) -> dict:
-    """Take explicit fields off a model — never dump a whole ORM object.
-
-    Dumping the object would drag in relationships, lazy loads and secret
-    columns (a password hash); naming the fields keeps the audit honest.
-    """
+    """Extract explicit fields from a model instance."""
     return {name: getattr(instance, name) for name in fields}
 
 
@@ -52,7 +28,7 @@ async def record(
     new=None,
     reason: str | None = None,
 ) -> AuditLog:
-    """Write one audit row in the caller's transaction (never commits)."""
+    """Write one audit row inside the caller's transaction."""
     validate_entry(entity_type, action)
 
     old_value = limit_size(redact(to_jsonable(old))) if old is not None else None
@@ -73,10 +49,7 @@ async def record(
 
 
 def balance_snapshot(balances) -> dict:
-    """Small before/after picture of balances, keyed by leave year id.
-
-    Returns Decimals; `record()` turns them into exact strings like "2.50".
-    """
+    """Capture pending, used, and available balances keyed by leave year ID."""
     return {
         str(year_id): {
             "pending": balance.pending,

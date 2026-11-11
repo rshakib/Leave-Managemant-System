@@ -14,6 +14,7 @@ import {
 
 import api, { errorMessage } from '../api/client'
 import DateFilter from '../components/DateFilter'
+import Icon from '../components/Icon'
 import { useAutoRefresh } from '../hooks/useAutoRefresh.js'
 
 const STATUSES = ['PENDING', 'SENDING', 'SENT', 'FAILED']
@@ -66,10 +67,8 @@ export default function AdminEmailsPage() {
     loadEmails()
   }, [loadEmails])
 
-  // Live view: reload after any change, when the tab returns, or on the poll.
-  useAutoRefresh(() => {
-      loadEmails()
-    }, { intervalMs: 60000 })
+  // Live real-time update (event-driven, silent background update with no spinner)
+  useAutoRefresh(loadEmails)
 
   const processQueue = async () => {
     setQueueRunning(true)
@@ -138,6 +137,17 @@ export default function AdminEmailsPage() {
         <Col md="auto">
           <Button size="sm" onClick={processQueue} disabled={queueRunning}>
             {queueRunning ? 'Processing…' : 'Process Queue Now'}
+          </Button>
+        </Col>
+        <Col md="auto">
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            onClick={loadEmails}
+            title="Refresh email log"
+          >
+            <Icon name="refresh" size={14} className="me-1" />
+            Refresh
           </Button>
         </Col>
         <Col md="auto">

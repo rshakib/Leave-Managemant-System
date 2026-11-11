@@ -1,10 +1,4 @@
-"""Rescue command: clear a locked-out email (Phase 16C).
-
-    python -m app.cli.unlock_login --email someone@example.com
-
-Deletes that email's LoginAttempt rows (which is what the rate limiter counts)
-and revokes every refresh token of the employee. Prints ONLY counts.
-"""
+"""Clear login lockouts for an email (``python -m app.cli.unlock_login --email ...``)."""
 
 import argparse
 import asyncio

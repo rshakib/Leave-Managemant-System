@@ -159,7 +159,6 @@ async def delete_division(
     session: AsyncSession = Depends(get_session),
     actor: Employee = Depends(get_current_user),
 ):
-    """Hard-delete an EMPTY division. Anything still pointing at it answers 409."""
     from sqlalchemy import func, select
 
     from app.models.department import Department

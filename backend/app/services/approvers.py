@@ -1,7 +1,4 @@
-"""Approver assignment rules (FR-APR-1/2, DECISIONS D-30).
-
-Routers stay thin: everything about "who approves whom" lives here.
-"""
+"""Employee approver assignment rules."""
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -24,7 +21,6 @@ MAX_APPROVERS = 10
 async def approver_role_holders(
     session: AsyncSession, employee_ids: list[int]
 ) -> set[int]:
-    """The subset of `employee_ids` that already hold the APPROVER role."""
     if not employee_ids:
         return set()
     rows = (
@@ -39,11 +35,7 @@ async def approver_role_holders(
 
 
 def require_approver_role(approvers, holders: set[int]) -> None:
-    """Only someone who ALREADY has the APPROVER role may approve (D-151).
-
-    The role is granted on the Employees page; it is never added automatically
-    here, so an assignment can never quietly make someone an approver.
-    """
+    """Ensure every assigned approver already holds the APPROVER role."""
     missing = [
         approver.employee_code for approver in approvers if approver.id not in holders
     ]
@@ -76,7 +68,6 @@ async def active_approver_rows(
 async def approver_reads(
     session: AsyncSession, employee_id: int
 ) -> list[ApproverRead]:
-    """The employee's active approvers, with the supervisor flagged."""
     rows = await active_approver_rows(session, employee_id)
     if not rows:
         return []
@@ -109,7 +100,6 @@ async def approver_reads(
 async def active_approver_count_for_others(
     session: AsyncSession, employee_id: int
 ) -> int:
-    """How many ACTIVE employees currently rely on this employee as an approver."""
     count = await session.scalar(
         select(func.count())
         .select_from(EmployeeApprover)
@@ -129,11 +119,7 @@ async def set_approvers(
     approver_ids: list[int],
     actor_id: int | None = None,
 ) -> list[ApproverRead]:
-    """Make the employee's ACTIVE approver set exactly `approver_ids` (D-77).
-
-    Existing rows are reactivated/deactivated rather than deleted, so a removed
-    and later re-added approver reuses the same row (D-79).
-    """
+    """Replace the employee's active approver set while preserving historical rows."""
     if not employee.is_active:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -176,7 +162,6 @@ async def set_approvers(
                 f"These approvers are inactive: {', '.join(inactive)}.",
             )
 
-        # D-151: the role must come first.
         require_approver_role(
             approvers, await approver_role_holders(session, ids)
         )
@@ -191,8 +176,6 @@ async def set_approvers(
     by_approver = {row.approver_id: row for row in existing}
     wanted = set(ids)
 
-    # DECISIONS D-93: an approver who still owes a decision on a PENDING request
-    # cannot be removed, or that request would be stuck forever.
     removed = {row.approver_id for row in existing if row.is_active} - wanted
     if removed:
         blocked = await session.scalar(
@@ -220,7 +203,6 @@ async def set_approvers(
 
     before_ids = sorted(row.approver_id for row in existing if row.is_active)
 
-    # Soft deactivate what is being removed; reactivate what is coming back.
     for approver_id, row in by_approver.items():
         row.is_active = approver_id in wanted
     for approver_id in wanted - set(by_approver):
@@ -239,9 +221,6 @@ async def set_approvers(
     try:
         await session.commit()
     except IntegrityError:
-        # Two admins saving at the same moment can both try to INSERT the same
-        # (employee, approver) pair. The UNIQUE constraint lets only one win;
-        # the loser is told to reload (its retry then takes the UPDATE path).
         await session.rollback()
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -255,38 +234,5 @@ async def set_approvers(
 async def ensure_supervisor_is_approver(
     session: AsyncSession, employee: Employee
 ) -> None:
-    """Add the employee's supervisor as an approver (FR-APR-2).
-
-    Called when a supervisor is set at creation time or actually changes on an
-    update. It never removes anyone. The caller is responsible for committing.
-    """
-    if employee.supervisor_id is None:
-        return
-
-    supervisor = await session.get(Employee, employee.supervisor_id)
-    if supervisor is None or not supervisor.is_active:
-        return
-
-    # D-151: a supervisor is pre-populated as an approver only if they REALLY are
-    # an approver; otherwise nothing happens (the admin grants the role first).
-    holders = await approver_role_holders(session, [supervisor.id])
-    if supervisor.id not in holders:
-        return
-
-    row = await session.scalar(
-        select(EmployeeApprover).where(
-            EmployeeApprover.employee_id == employee.id,
-            EmployeeApprover.approver_id == supervisor.id,
-        )
-    )
-    if row is None:
-        session.add(
-            EmployeeApprover(
-                employee_id=employee.id,
-                approver_id=supervisor.id,
-                is_active=True,
-            )
-        )
-    elif not row.is_active:
-        row.is_active = True
+    return
 

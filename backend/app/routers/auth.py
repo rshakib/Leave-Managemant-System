@@ -28,8 +28,6 @@ COOKIE_PATH = "/auth"
 
 
 class ChangePasswordIn(SQLModel):
-    # Optional ONLY for the forced first change (D-198). A normal password change
-    # still requires it, and a value that IS sent is always verified.
     current_password: str | None = None
     new_password: str
 
@@ -74,14 +72,6 @@ def _clear_cookie(response: Response) -> None:
 
 
 def _origin_allowed(request: Request) -> bool:
-    """CSRF guard for the cookie-based endpoints.
-
-    A browser always sends Origin on a cross-site POST, so an Origin that is not
-    one of our own front-ends means somebody else's page is trying to use the
-    cookie. A request WITHOUT an Origin is allowed on purpose: non-browser
-    clients (curl, the test suite, mobile apps) send no Origin, and they carry no
-    ambient cookie authority of their own.
-    """
     origin = request.headers.get("origin")
     if not origin:
         return True
@@ -95,7 +85,6 @@ async def login(
     form: OAuth2PasswordRequestForm = Depends(),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, object]:
-    """Exchange email + password for an access token and a refresh cookie."""
     employee, access_token, raw_refresh = await auth_service.login(
         session,
         form.username,
@@ -108,8 +97,6 @@ async def login(
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        # The front-end sends the user straight to "change password" when this is
-        # true, instead of letting them into the app (D-190).
         "must_change_password": employee.must_change_password,
     }
 
@@ -119,7 +106,6 @@ async def refresh(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    """Rotate the refresh cookie and hand out a new access token."""
     if not _origin_allowed(request):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
@@ -195,8 +181,6 @@ async def change_password(
 
 
 class SessionRead(SQLModel):
-    """One signed-in device. No token, no hash and no IP address is ever shown."""
-
     id: str
     device: str
     current: bool
@@ -211,8 +195,6 @@ async def list_my_sessions(
     employee: Employee = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> list[SessionRead]:
-    """Where is this account signed in? Taken from the token, so it can only
-    ever return the caller's own sessions (the same rule as D-69/D-84)."""
     rows = await sessions_service.list_sessions(
         session, employee, request.cookies.get(auth_service.COOKIE_NAME)
     )
@@ -225,7 +207,6 @@ async def end_session(
     employee: Employee = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    """End ONE of the caller's own sessions (for example a laptop left behind)."""
     await sessions_service.revoke_session(session, employee, session_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -235,7 +216,14 @@ async def read_me(
     employee: Employee = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> EmployeeRead:
-    return employee_to_read(employee, await load_roles(session, employee.id))
+    has_subordinates = await session.scalar(
+        select(Employee.id).where(
+            Employee.supervisor_id == employee.id,
+            Employee.is_active.is_(True),
+        ).limit(1)
+    )
+    is_sup = has_subordinates is not None
+    return employee_to_read(employee, await load_roles(session, employee.id), is_supervisor=is_sup)
 
 
 @router.post("/forgot-password")

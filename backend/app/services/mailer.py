@@ -1,9 +1,4 @@
-"""Email backends behind one tiny interface (DECISIONS D-19).
-
-`console`  — prints recipients, subject and body to the log (development)
-`file`     — writes one .eml per message into EMAIL_FILE_DIR (development/tests)
-`smtp`     — real SMTP via smtplib in a thread (never used in this phase)
-"""
+"""Email delivery backends (console, file, and SMTP)."""
 
 import logging
 import smtplib
@@ -19,9 +14,15 @@ from app.services.email_rules import sanitize_header
 
 logger = logging.getLogger(__name__)
 
+# Protected recipient addresses suppressed from automated/demo delivery.
+PROTECTED_RECIPIENT_EMAILS: frozenset[str] = frozenset({
+    "raton.hosen@solshare.com",
+    "ishtiaque.ahmed@solshare.com",
+})
+
 
 class MailerError(RuntimeError):
-    """Raised when a message could not be sent."""
+    pass
 
 
 @dataclass(frozen=True)
@@ -34,7 +35,6 @@ class Message:
 
 
 def validate_config() -> None:
-    """Called by the worker at startup."""
     backend = settings.email_backend.lower()
     if backend not in ("console", "file", "smtp"):
         raise MailerError(
@@ -47,8 +47,6 @@ def validate_config() -> None:
 
 def _build(message: Message) -> EmailMessage:
     email = EmailMessage()
-    # Every header goes through sanitize_header: user text must never be able to
-    # inject a new header (e.g. a name containing "\r\nBcc: ...").
     email["Subject"] = sanitize_header(message.subject)
     email["From"] = sanitize_header(settings.email_from)
     email["To"] = ", ".join(sanitize_header(address) for address in message.to)
@@ -74,7 +72,6 @@ def _send_console(email: EmailMessage) -> None:
 def _send_file(email: EmailMessage) -> None:
     directory = settings.email_outbox_dir
     directory.mkdir(parents=True, exist_ok=True)
-    # The filename is random and never built from user input.
     path = directory / f"{uuid.uuid4().hex}.eml"
     path.write_bytes(bytes(email))
 
@@ -103,7 +100,7 @@ def _send_smtp(email: EmailMessage) -> None:
                 if settings.smtp_user:
                     client.login(settings.smtp_user, settings.smtp_password)
                 client.send_message(email)
-        except BaseException as exc:  # noqa: BLE001 - reported to the caller
+        except BaseException as exc:  # noqa: BLE001
             failures.append(exc)
 
     thread = threading.Thread(target=deliver, daemon=True)
@@ -116,10 +113,47 @@ def _send_smtp(email: EmailMessage) -> None:
 
 
 def send(message: Message) -> str:
-    """Send one message; returns the backend name used."""
     validate_config()
     backend = settings.email_backend.lower()
-    email = _build(message)
+
+    filtered_to = [
+        addr for addr in message.to
+        if (addr or "").strip().lower() not in PROTECTED_RECIPIENT_EMAILS
+    ]
+    filtered_cc = [
+        addr for addr in message.cc
+        if (addr or "").strip().lower() not in PROTECTED_RECIPIENT_EMAILS
+    ]
+
+    dropped = [
+        addr for addr in (list(message.to) + list(message.cc))
+        if (addr or "").strip().lower() in PROTECTED_RECIPIENT_EMAILS
+    ]
+    if dropped:
+        logger.warning(
+            "BOSS EMAIL SAFETY GUARD: Filtered out protected address(es) %s from message '%s'",
+            dropped,
+            message.subject,
+        )
+
+    if not filtered_to and filtered_cc:
+        filtered_to = [filtered_cc.pop(0)]
+
+    if not filtered_to:
+        logger.warning(
+            "BOSS EMAIL SAFETY GUARD: No unblocked recipients remain for '%s'. Suppressing live send.",
+            message.subject,
+        )
+        return "blocked_safety"
+
+    safe_message = Message(
+        to=filtered_to,
+        cc=filtered_cc,
+        subject=message.subject,
+        text=message.text,
+        html=message.html,
+    )
+    email = _build(safe_message)
 
     if backend == "console":
         _send_console(email)

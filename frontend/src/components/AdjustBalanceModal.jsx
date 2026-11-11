@@ -40,14 +40,26 @@ function parseCents(text) {
   return negative ? -cents : cents
 }
 
-function show(cents) {
+function formatCents(cents) {
   const negative = cents < 0
   const absolute = Math.abs(cents)
   const text = `${Math.floor(absolute / 100)}.${String(absolute % 100).padStart(2, '0')}`
   return negative ? `-${text}` : text
 }
 
-export default function AdjustBalanceModal({ balance, show: visible, yearClosed, onHide, onSaved }) {
+export default function AdjustBalanceModal({
+  balance,
+  show: showModal = true,
+  yearClosed = false,
+  onHide,
+  onClose,
+  onSaved,
+  onAdjusted,
+}) {
+  const isVisible = Boolean(showModal)
+  const handleClose = onHide || onClose || (() => {})
+  const handleSaved = onSaved || onAdjusted || (() => {})
+
   const [field, setField] = useState('ALLOCATED')
   const [deltaText, setDeltaText] = useState('')
   const [reason, setReason] = useState('')
@@ -97,7 +109,7 @@ export default function AdjustBalanceModal({ balance, show: visible, yearClosed,
 
   const close = () => {
     reset()
-    onHide()
+    handleClose()
   }
 
   const save = async (event) => {
@@ -108,10 +120,10 @@ export default function AdjustBalanceModal({ balance, show: visible, yearClosed,
     try {
       const { data } = await api.post(`/leave-balances/${balance.id}/adjust`, {
         field,
-        delta: show(preview.delta),
+        delta: formatCents(preview.delta),
         reason: reason.trim(),
       })
-      onSaved(data)
+      handleSaved(data)
       close()
     } catch (err) {
       setError(errorMessage(err, 'Could not adjust the balance.'))
@@ -120,7 +132,7 @@ export default function AdjustBalanceModal({ balance, show: visible, yearClosed,
   }
 
   return (
-    <Modal show={visible} onHide={close} centered>
+    <Modal show={isVisible} onHide={close} centered>
       <Form onSubmit={save}>
         <Modal.Header closeButton>
           <Modal.Title>Adjust balance</Modal.Title>
@@ -172,7 +184,7 @@ export default function AdjustBalanceModal({ balance, show: visible, yearClosed,
               <div className="lms-figure">
                 <span className="lms-figure__label">{field.replace('_', ' ')}</span>
                 <strong className="lms-figure__value">
-                  {show(preview.before)} → {show(preview.after)}
+                  {formatCents(preview.before)} → {formatCents(preview.after)}
                 </strong>
               </div>
               <div className="lms-figure">
@@ -180,7 +192,7 @@ export default function AdjustBalanceModal({ balance, show: visible, yearClosed,
                 <strong
                   className={`lms-figure__value${preview.availableAfter < 0 ? ' is-warn' : ''}`}
                 >
-                  {show(preview.availableBefore)} → {show(preview.availableAfter)}
+                  {formatCents(preview.availableBefore)} → {formatCents(preview.availableAfter)}
                 </strong>
               </div>
             </div>

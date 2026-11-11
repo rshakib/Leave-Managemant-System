@@ -1,6 +1,23 @@
 import { useEffect, useState } from 'react'
 import { Button, Col, Form } from 'react-bootstrap'
 
+export function toIsoDate(d) {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+export function getLastMonthRange() {
+  const today = new Date()
+  const oneMonthAgo = new Date(today)
+  oneMonthAgo.setMonth(today.getMonth() - 1)
+  return {
+    from: toIsoDate(oneMonthAgo),
+    to: toIsoDate(today),
+  }
+}
+
 /**
  * Reusable DateFilter component supporting both Single Date and Date Range filtering.
  *

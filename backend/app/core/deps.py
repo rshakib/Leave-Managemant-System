@@ -1,5 +1,3 @@
-"""Shared FastAPI dependencies: current user and role guards."""
-
 from collections.abc import Awaitable, Callable
 
 import jwt
@@ -16,7 +14,6 @@ from app.services.password_rules import (
     may_use_application,
 )
 
-# Tells /docs where to get a token; the "Authorize" button posts to this URL.
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
@@ -40,12 +37,7 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     session: AsyncSession = Depends(get_session),
 ) -> Employee:
-    """Resolve the Bearer token to an active employee.
-
-    Roles are deliberately NOT read from the token: the employee and their
-    roles are loaded from the database on every request, so deactivating an
-    employee or changing their roles takes effect immediately (DECISIONS D-44).
-    """
+    """Resolve the Bearer token to an active employee."""
     try:
         payload = decode_access_token(token)
     except jwt.ExpiredSignatureError:
@@ -65,10 +57,6 @@ async def get_current_user(
     if employee is None or not employee.is_active:
         raise _unauthorized("Invalid or inactive account.")
 
-    # An admin created or reset this password, so the employee must choose their
-    # own before doing anything else. Only the calls needed for that are allowed
-    # through (D-190). This is the ONE place that enforces it: every protected
-    # route goes through this dependency.
     if not may_use_application(
         must_change_password=employee.must_change_password, path=request.url.path
     ):
@@ -82,7 +70,7 @@ async def get_current_user(
 
 
 def require_roles(*allowed: Role | str) -> Callable[..., Awaitable[Employee]]:
-    """Build a dependency that allows only the given roles through."""
+    """Build a FastAPI dependency that restricts access to the given roles."""
     required = {Role(role) for role in allowed}
 
     async def dependency(

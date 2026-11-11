@@ -3,14 +3,6 @@
 Revision ID: 8630a284ed68
 Revises: 9ee0f38d8146
 Create Date: 2026-10-23 01:33:00.388830
-
-Creates the `employee` table (FR-EMP-1, FR-EMP-2) and the `employee_role`
-join table (DECISIONS D-13), and enables Row Level Security on both.
-
-RLS note: Supabase's public Data API connects as the `anon`/`authenticated`
-roles. Enabling RLS with no policies denies them access, while our backend
-connects as the table owner (`postgres`), which bypasses RLS unless FORCE ROW
-LEVEL SECURITY is set (we do not set it). So the backend keeps full access.
 """
 from typing import Sequence, Union
 
@@ -65,6 +57,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    # Dropping a table also drops its RLS settings, so no explicit DISABLE.
     op.drop_table('employee_role')
     op.drop_table('employee')

@@ -19,28 +19,72 @@ outbox with a worker. The React frontend has the matching screens (including an 
 - **Node.js 20.19+ or 22+** (check: `node --version`) and npm — with nvm, run `nvm use 22`
 - **Docker** (only if you want a local database)
 
-## 1. Database
+## 1. Docker Setup (Run Full App or Database)
 
-The app reads `DATABASE_URL` from `backend/.env`. Pick one:
+The project includes a complete multi-container setup in `docker-compose.yml`:
+- **`leave_db`**: PostgreSQL 16 on port `5432` with automated health checks.
+- **`leave_backend`**: FastAPI application with automatic Alembic migrations on startup (port `8000`).
+- **`leave_worker`**: Background email outbox worker & daily maintenance processor (`python -m app.worker`).
+- **`leave_frontend`**: React web application served via Nginx (port `5173`).
+- **`leave_mailpit`**: Optional local email testing inbox (SMTP port `1025`, Web UI at `http://localhost:8025`).
 
-**Supabase (cloud)** — paste the connection string as-is into `backend/.env`:
+### Quick Start with Docker (Entire Stack)
+
+```bash
+# 1. Copy the docker environment configuration at repo root
+cp .env.example .env
+
+# 2. Build and start all services (Database + Backend + Worker + Frontend)
+docker compose up -d --build
+
+# 3. Verify running containers
+docker compose ps
+```
+
+Once started:
+- **Frontend Web UI:** <http://localhost:5173>
+- **Backend API Docs (Swagger):** <http://localhost:8000/docs>
+- **Backend Health Check:** <http://localhost:8000/health/ready>
+- **PostgreSQL Database:** `localhost:5432` (user `leave_user`, db `leave_db`)
+
+> [!NOTE]
+> If you only want to run the database in Docker (and run backend/frontend manually via venv/npm):
+> ```bash
+> docker compose up -d db
+> ```
+
+---
+
+### Docker Operations & Useful Commands
+
+| Task | Command |
+| --- | --- |
+| **Start entire app (build & run)** | `docker compose up -d --build` |
+| **Start database only** | `docker compose up -d db` |
+| **Start everything + Mailpit email inbox** | `docker compose --profile mail up -d --build` |
+| **Check running containers & health** | `docker compose ps` |
+| **View backend logs (live stream)** | `docker compose logs -f backend` |
+| **View worker logs (email dispatch & queue)** | `docker compose logs -f worker` |
+| **View database logs** | `docker compose logs -f db` |
+| **View frontend logs** | `docker compose logs -f frontend` |
+| **View all container logs** | `docker compose logs -f` |
+| **Restart all containers** | `docker compose restart` |
+| **Enter Postgres terminal directly** | `docker compose exec db psql -U leave_user -d leave_db` |
+| **Create first admin in Docker** | `docker compose exec backend python -m app.cli.seed_admin` |
+| **Stop containers (preserve data)** | `docker compose down` |
+| **Stop and wipe database (fresh reset)** | `docker compose down -v` |
+
+---
+
+### B. Cloud Database Alternative (Supabase)
+
+If you prefer Supabase instead of local Docker:
 
 ```bash
 cd backend && cp .env.example .env
-# then edit backend/.env:  DATABASE_URL=postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require
+# Edit backend/.env:
+# DATABASE_URL=postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require
 ```
-
-**Local PostgreSQL via Docker:**
-
-```bash
-cp .env.example .env          # repo root: POSTGRES_* values for docker-compose
-docker compose up -d
-docker compose ps             # wait for "healthy"
-# then in backend/.env:  DATABASE_URL=postgresql://leave_user:leave_password@localhost:5432/leave_db
-```
-
-Stop the local database later with `docker compose down` (keeps data) or
-`docker compose down -v` (also deletes the data volume).
 
 ## 2. Backend
 
@@ -278,6 +322,22 @@ docker run hello-world   # should print "Hello from Docker!"
 ```
 
 Note: membership in the `docker` group is effectively root-level access on this machine.
+
+**`port 5432: bind: address already in use`** — this happens if a PostgreSQL server is already running directly on your host machine. You can either:
+1. Stop the host PostgreSQL:
+   ```bash
+   sudo systemctl stop postgresql
+   ```
+2. Or change the port in `.env` (root directory) to another port such as `5433`:
+   ```ini
+   POSTGRES_PORT=5433
+   ```
+   And in `backend/.env`, update `DATABASE_URL=postgresql://leave_user:leave_password@localhost:5433/leave_db`.
+
+**`Docker daemon is not running`** — start the Docker service with:
+```bash
+sudo systemctl start docker
+```
 
 **Vite engine warning / build fails on an old Node** — this project needs Node 20.19+ (or 22+).
 Check `node --version`; with nvm, run `nvm use 22` before `npm install`.

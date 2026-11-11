@@ -25,7 +25,6 @@ ADMIN_ONLY = [Depends(require_roles(Role.ADMIN))]
 
 
 def _read_rows(rows) -> list[AdjustmentRead]:
-    """Shape joined rows into the response (one query, no N+1)."""
     return [
         AdjustmentRead(
             id=row[0].id,
@@ -85,7 +84,6 @@ async def adjust_balance(
     actor: Employee = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Change ONE stored number of a balance, with a required reason."""
     reject_unknown_field((payload.field or "").upper())
 
     outcome = await adjust(
@@ -124,6 +122,7 @@ async def list_adjustments(
     employee_id: int | None = None,
     leave_type_id: int | None = None,
     leave_year_id: int | None = None,
+    balance_id: int | None = None,
     field: str | None = None,
     created_by: int | None = None,
     date_from: datetime.date | None = None,
@@ -136,6 +135,8 @@ async def list_adjustments(
     offset = max(0, offset)
 
     filters = []
+    if balance_id is not None:
+        filters.append(LeaveBalanceAdjustment.balance_id == balance_id)
     if employee_id is not None:
         filters.append(LeaveBalanceAdjustment.employee_id == employee_id)
     if leave_type_id is not None:
@@ -190,7 +191,6 @@ async def my_adjustments(
     current: Employee = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> AdjustmentPage:
-    """The caller's OWN adjustments. There is no id parameter on purpose."""
     limit = min(max(1, limit), 100)
     offset = max(0, offset)
 

@@ -1,8 +1,4 @@
-"""Login, refresh-token rotation and rate limiting (Phase 16C, D-163…D-166).
-
-Everything that touches `refresh_token` / `login_attempt` lives here so the
-routers stay thin.
-"""
+"""Authentication, refresh token rotation, and login rate limiting service."""
 
 import datetime
 import uuid
@@ -40,9 +36,7 @@ GENERIC_INVALID = "Incorrect email or password."
 GENERIC_LOCKED = "Too many failed sign-in attempts. Please try again later."
 MAX_PASSWORD_INPUT = 128
 
-# Verifying against this when the email does not exist (or the account is
-# inactive) keeps the response time the same, so timing cannot reveal which case
-# applied (D-165).
+# Used to keep password verification timing uniform for missing or inactive users.
 _DUMMY_HASH = hash_password("timing-equaliser-not-a-real-password")
 
 
@@ -121,13 +115,10 @@ async def login(
     user_agent: str | None,
     now: datetime.datetime | None = None,
 ) -> tuple[Employee, str, str]:
-    """Return (employee, access_token, refresh_token)."""
     now = now or utcnow()
     email = normalise_email(email)
     ip_key = ip_key_for(ip)
 
-    # A password longer than the policy maximum cannot be a real password: answer
-    # with the same generic 401, without paying for an argon2 verification.
     if len(password or "") > MAX_PASSWORD_INPUT:
         await record_attempt(session, email, ip_key, success=False)
         await session.commit()
@@ -161,11 +152,7 @@ async def login(
     employee = await session.scalar(select(Employee).where(Employee.email == email))
 
     if not decision.allowed:
-        # One audit row per BLOCK (the pair key has just reached its limit), and
-        # only when the email exists — never create rows for strangers.
         if employee is not None and len(pair) >= limits_now.pair_failures:
-            # ONCE per block: if a LOGIN_LOCKED row already exists inside this
-            # window we are still in the same block, so do not write another.
             already = await session.scalar(
                 select(func.count())
                 .select_from(AuditLog)
@@ -201,7 +188,7 @@ async def login(
         await session.commit()
         raise invalid_credentials()
 
-    # Seamlessly upgrade legacy Django pbkdf2 hash to Argon2
+    # Upgrade legacy Django PBKDF2 hashes on login.
     if employee.password_hash.startswith("pbkdf2_sha256$"):
         employee.password_hash = hash_password(password)
         session.add(employee)
@@ -273,7 +260,7 @@ async def rotate(
     user_agent: str | None,
     now: datetime.datetime | None = None,
 ) -> tuple[Employee, str, str]:
-    """Rotate a refresh token. Returns (employee, access_token, new_cookie)."""
+    """Rotate a refresh token and issue a fresh access token."""
     now = now or utcnow()
     if not raw_cookie:
         raise invalid_credentials()
@@ -307,8 +294,7 @@ async def rotate(
         await session.commit()
         raise invalid_credentials()
 
-    # VALID: lock the row, then re-read it FRESH (another tab may have rotated it
-    # while we waited for the lock).
+    # Re-read under row lock to serialize concurrent refresh calls.
     await session.execute(
         select(RefreshToken.id).where(RefreshToken.id == row.id).with_for_update()
     )
@@ -355,12 +341,10 @@ async def change_password(
     ip: str | None,
     user_agent: str | None,
 ) -> str:
-    """Change the password, revoke the other sessions, return a new cookie value."""
+    """Update password, revoke existing refresh tokens, and issue a new refresh cookie."""
     now = utcnow()
     ip_key = ip_key_for(ip)
 
-    # The forced first change does not need the old password (D-198); every other
-    # change does. A value that IS sent must still be correct — never ignored.
     needs_old = current_password_required(
         must_change_password=employee.must_change_password
     )
@@ -388,7 +372,6 @@ async def change_password(
         )
 
     employee.password_hash = hash_password(new_password)
-    # The employee has now chosen their own password (D-190).
     employee.must_change_password = False
     await revoke_all(session, employee.id, now)
     raw, _row = await issue_refresh(

@@ -5,8 +5,6 @@ from app.models.base import BaseModel
 
 
 class Division(BaseModel, SQLModel, table=True):
-    """A top-level part of the organisation. Named `division` in the database."""
-
     __tablename__ = "division"
 
     id: int | None = Field(default=None, primary_key=True, sa_type=BigInteger)
@@ -15,9 +13,6 @@ class Division(BaseModel, SQLModel, table=True):
         default=True,
         sa_column=Column(Boolean, nullable=False, server_default=text("true")),
     )
-
-
-# --- Pydantic-only models (never a database table) -------------------------
 
 
 class DivisionCreate(SQLModel):

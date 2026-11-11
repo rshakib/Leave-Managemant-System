@@ -23,7 +23,6 @@ LOGGED_IN = [Depends(get_current_user)]
 
 
 async def _reads(session: AsyncSession, years: list[LeaveYear]) -> list[LeaveYearRead]:
-    """Attach the name of whoever closed each year (one extra query, no N+1)."""
     closer_ids = {year.closed_by_id for year in years if year.closed_by_id}
     names: dict[int, str] = {}
     if closer_ids:
@@ -76,7 +75,6 @@ async def _ensure_no_overlap(
     end_date: date,
     exclude_id: int | None = None,
 ) -> None:
-    # Two ranges overlap when each one starts before the other ends.
     statement = select(LeaveYear).where(
         LeaveYear.start_date <= end_date, LeaveYear.end_date >= start_date
     )
@@ -206,11 +204,6 @@ async def activate_leave_year(
     session: AsyncSession = Depends(get_session),
     actor: Employee = Depends(get_current_user),
 ) -> LeaveYearRead:
-    """Make this the single active leave year (DECISIONS D-52).
-
-    Deactivating the previous active year and activating this one happen in a
-    single transaction, so there is never a moment with two active years.
-    """
     year = await _get_or_404(session, year_id)
     if year.is_closed:
         raise HTTPException(

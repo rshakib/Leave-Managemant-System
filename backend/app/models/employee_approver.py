@@ -5,15 +5,6 @@ from app.models.base import BaseModel
 
 
 class EmployeeApprover(BaseModel, SQLModel, table=True):
-    """Which employees may approve leave for a given employee (FR-APR-1).
-
-    Rows are **soft-deactivated**, never deleted, so an approver that is removed
-    and later added again reuses the same row (DECISIONS D-79).
-
-    `employee_id <> approver_id` is enforced by the database as well as the API
-    (DECISIONS D-30).
-    """
-
     __tablename__ = "employee_approver"
     __table_args__ = (
         UniqueConstraint("employee_id", "approver_id", name="uq_employee_approver"),
@@ -31,12 +22,7 @@ class EmployeeApprover(BaseModel, SQLModel, table=True):
     )
 
 
-# --- Pydantic-only models (never a database table) -------------------------
-
-
 class ApproverRead(SQLModel):
-    """One approver, as shown in the UI."""
-
     id: int
     employee_code: str
     full_name: str
@@ -44,13 +30,10 @@ class ApproverRead(SQLModel):
 
 
 class ApproversUpdate(SQLModel):
-    # The active set becomes EXACTLY this list (D-77). An empty list is allowed.
     approver_ids: list[int] = Field(default_factory=list)
 
 
 class EmployeeApproversRead(SQLModel):
-    """One employee row in the admin overview."""
-
     employee_id: int
     employee_code: str
     employee_name: str

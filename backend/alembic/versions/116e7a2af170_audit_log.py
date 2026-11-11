@@ -3,14 +3,6 @@
 Revision ID: 116e7a2af170
 Revises: befce6c4a656
 Create Date: 2026-10-25 23:27:45.957197
-
-Creates `audit_log` (NFR-1, DECISIONS D-23/D-24) and makes it APPEND-ONLY:
-a trigger raises an exception for UPDATE, DELETE and TRUNCATE, so even a bug (or
-a careless SQL session) cannot rewrite history.
-
-The same trigger is the escape hatch for the one legitimate operation: an
-operator can run `ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_update_delete`
-inside a transaction to remove rows deliberately, and must enable it again.
 """
 from typing import Sequence, Union
 
@@ -50,10 +42,8 @@ def upgrade() -> None:
     op.create_index('ix_audit_log_created', 'audit_log', [sa.literal_column('created_at DESC')], unique=False)
     op.create_index('ix_audit_log_entity', 'audit_log', ['entity_type', 'entity_id', sa.literal_column('created_at DESC')], unique=False)
 
-    # Supabase: block the public Data API from this table.
     op.execute("ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY")
 
-    # --- append-only guarantee ------------------------------------------
     op.execute(
         f"""
         CREATE FUNCTION {TRIGGER_FUNCTION}() RETURNS trigger AS $$

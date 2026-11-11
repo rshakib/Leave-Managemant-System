@@ -1,10 +1,4 @@
-"""Data-retention command (Phase 16D-1).
-
-    python -m app.cli.cleanup            # DRY RUN: prints counts, deletes nothing
-    python -m app.cli.cleanup --apply    # really deletes
-
-Prints counts only — never any personal data or connection details.
-"""
+"""Data-retention cleanup CLI (``python -m app.cli.cleanup``)."""
 
 import argparse
 import asyncio

@@ -1,14 +1,4 @@
-"""Pure email planning and delivery rules (FR-NOT-1, FR-NOT-2).
-
-No database, no network: given an event and the facts, say exactly which emails
-should exist. The worker later renders and sends them.
-
-Recipient rule: an employee/approver is included only if they have an address and
-are active; addresses are de-duplicated case-insensitively and never appear in
-both `to` and `cc`. The person who performed the action is not Cc'd on their own
-action (they already know) — except on a SUBMITTED email, where the employee is a
-required Cc, and on the extra employee email sent when an admin cancels.
-"""
+"""Pure email notification planning and delivery rules."""
 
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -18,21 +8,29 @@ from app.services.day_calc import DayCalcError, DayType, calculate_chargeable_da
 SUBMITTED = "SUBMITTED"
 APPROVER_ACTED = "APPROVER_ACTED"
 APPROVED = "APPROVED"
+APPROVED_SUPERVISOR = "APPROVED_SUPERVISOR"
 REJECTED = "REJECTED"
 CANCELLED = "CANCELLED"
 CANCELLED_EMPLOYEE = "CANCELLED_EMPLOYEE"
 REMINDER = "REMINDER"
 PASSWORD_RESET = "PASSWORD_RESET"
+CURTAILMENT_SUBMITTED = "CURTAILMENT_SUBMITTED"
+CURTAILMENT_APPROVED = "CURTAILMENT_APPROVED"
+CURTAILMENT_REJECTED = "CURTAILMENT_REJECTED"
 
 EVENTS = (
     SUBMITTED,
     APPROVER_ACTED,
     APPROVED,
+    APPROVED_SUPERVISOR,
     REJECTED,
     CANCELLED,
     CANCELLED_EMPLOYEE,
     REMINDER,
     PASSWORD_RESET,
+    CURTAILMENT_SUBMITTED,
+    CURTAILMENT_APPROVED,
+    CURTAILMENT_REJECTED,
 )
 
 REMINDER_AFTER_WORKING_DAYS = 2
@@ -41,6 +39,7 @@ MAX_HEADER_LENGTH = 200
 
 _COMMON_FACTS = (
     "request_id",
+    "employee_code",
     "employee_name",
     "leave_type_code",
     "leave_type_name",
@@ -61,12 +60,17 @@ class EmailSpec:
     payload: dict = field(default_factory=dict)
 
 
+PROTECTED_RECIPIENT_EMAILS: frozenset[str] = frozenset({
+    "raton.hosen@solshare.com",
+    "ishtiaque.ahmed@solshare.com",
+})
+
+
 def _text(value) -> str:
     return value.value if hasattr(value, "value") else str(value)
 
 
 def clean_addresses(values) -> list[str]:
-    """Lowercase, trim, drop empties, de-duplicate while keeping order."""
     seen: list[str] = []
     for value in values:
         address = (value or "").strip().lower()
@@ -83,21 +87,30 @@ def _payload(facts: dict, extra: dict | None = None) -> dict:
 
 
 def _active_approver_emails(facts: dict) -> list[str]:
-    return clean_addresses(
-        approver.get("email")
-        for approver in facts.get("approvers", [])
-        if approver.get("is_active", True) and approver.get("email")
-    )
+    return [
+        addr
+        for addr in clean_addresses(
+            approver.get("email")
+            for approver in facts.get("approvers", [])
+            if approver.get("is_active", True) and approver.get("email")
+        )
+        if addr not in PROTECTED_RECIPIENT_EMAILS
+    ]
 
 
 def plan_emails(event, facts: dict) -> list[EmailSpec]:
-    """Return the emails that `event` should produce."""
     event = _text(event)
     request_id = facts.get("request_id")
     employee_email = (facts.get("employee_email") or "").strip().lower()
+    if employee_email in PROTECTED_RECIPIENT_EMAILS:
+        employee_email = ""
     actor_email = (facts.get("actor_email") or "").strip().lower()
     approver_emails = _active_approver_emails(facts)
-    admin_cc = clean_addresses(facts.get("notify_cc_admin_emails") or [])
+    admin_cc = [
+        addr
+        for addr in clean_addresses(facts.get("notify_cc_admin_emails") or [])
+        if addr not in PROTECTED_RECIPIENT_EMAILS
+    ]
 
     def spec(
         event_type: str,
@@ -121,11 +134,34 @@ def plan_emails(event, facts: dict) -> list[EmailSpec]:
         )
 
     if event == SUBMITTED:
+        approvers_list = facts.get("approvers")
+        if approvers_list:
+            specs = []
+            for approver in approvers_list:
+                email = (approver.get("email") or "").strip().lower()
+                if not email or not approver.get("is_active", True) or email in PROTECTED_RECIPIENT_EMAILS:
+                    continue
+                approver_id = approver.get("id") or approver.get("approver_id") or email
+                payload = _payload(facts, {
+                    "approver_count": len(approver_emails),
+                    "approver_name": approver.get("name"),
+                    "token": approver.get("token"),
+                })
+                specs.append(
+                    spec(
+                        SUBMITTED,
+                        [email],
+                        [],
+                        f"submitted:{request_id}:{approver_id}",
+                        payload,
+                    )
+                )
+            return specs
         return [
             spec(
                 SUBMITTED,
                 approver_emails,
-                [employee_email],
+                [],
                 f"submitted:{request_id}",
                 _payload(facts, {"approver_count": len(approver_emails)}),
             )
@@ -158,7 +194,18 @@ def plan_emails(event, facts: dict) -> list[EmailSpec]:
         cc = list(approver_emails)
         if facts.get("notify_cc_admins_on_final"):
             cc += admin_cc
-        return [
+
+        supervisor_email = (facts.get("supervisor_email") or "").strip().lower()
+        has_supervisor_email = (
+            supervisor_email
+            and supervisor_email not in PROTECTED_RECIPIENT_EMAILS
+            and supervisor_email != employee_email
+        )
+
+        if has_supervisor_email:
+            cc = [addr for addr in cc if addr != supervisor_email]
+
+        specs = [
             spec(
                 APPROVED,
                 [employee_email],
@@ -168,6 +215,49 @@ def plan_emails(event, facts: dict) -> list[EmailSpec]:
                 drop_actor_cc=True,
             )
         ]
+
+        if has_supervisor_email:
+            specs.append(
+                spec(
+                    APPROVED_SUPERVISOR,
+                    [supervisor_email],
+                    [],
+                    f"approved_supervisor:{request_id}",
+                    _payload(
+                        facts,
+                        {
+                            "balances": facts.get("balances", []),
+                            "supervisor_name": facts.get("supervisor_name"),
+                        },
+                    ),
+                )
+            )
+
+        return specs
+
+    if event == APPROVED_SUPERVISOR:
+        supervisor_email = (facts.get("supervisor_email") or "").strip().lower()
+        if (
+            supervisor_email
+            and supervisor_email not in PROTECTED_RECIPIENT_EMAILS
+            and supervisor_email != employee_email
+        ):
+            return [
+                spec(
+                    APPROVED_SUPERVISOR,
+                    [supervisor_email],
+                    [],
+                    f"approved_supervisor:{request_id}",
+                    _payload(
+                        facts,
+                        {
+                            "balances": facts.get("balances", []),
+                            "supervisor_name": facts.get("supervisor_name"),
+                        },
+                    ),
+                )
+            ]
+        return []
 
     if event == REJECTED:
         return [
@@ -205,7 +295,6 @@ def plan_emails(event, facts: dict) -> list[EmailSpec]:
                 drop_actor_cc=True,
             )
         ]
-        # An admin cancelling someone else's leave also tells the employee why.
         if facts.get("cancelled_by_admin") and employee_email:
             specs.append(
                 spec(
@@ -240,17 +329,91 @@ def plan_emails(event, facts: dict) -> list[EmailSpec]:
             )
         ]
 
+    if event == CURTAILMENT_SUBMITTED:
+        approvers_list = facts.get("approvers") or []
+        specs = []
+        for approver in approvers_list:
+            email = (approver.get("email") or "").strip().lower()
+            if not email or not approver.get("is_active", True) or email in PROTECTED_RECIPIENT_EMAILS:
+                continue
+            approver_id = approver.get("id") or approver.get("approver_id") or email
+            payload = _payload(facts, {
+                "approver_name": approver.get("name"),
+                "curtailment_id": facts.get("curtailment_id"),
+                "original_end_date": facts.get("original_end_date"),
+                "curtailed_end_date": facts.get("curtailed_end_date"),
+                "curtailed_day_type": facts.get("curtailed_day_type"),
+                "days_to_refund": str(facts.get("days_to_refund", "0")),
+                "new_days": str(facts.get("new_days", "0")),
+                "original_days": str(facts.get("original_days", "0")),
+                "curtailment_reason": facts.get("curtailment_reason") or facts.get("reason"),
+            })
+            specs.append(
+                spec(
+                    CURTAILMENT_SUBMITTED,
+                    [email],
+                    [],
+                    f"curtailment_submitted:{facts.get('curtailment_id')}:{approver_id}",
+                    payload,
+                )
+            )
+        return specs
+
+    if event == CURTAILMENT_APPROVED:
+        return [
+            spec(
+                CURTAILMENT_APPROVED,
+                [employee_email],
+                approver_emails,
+                f"curtailment_approved:{facts.get('curtailment_id')}",
+                _payload(
+                    facts,
+                    {
+                        "curtailment_id": facts.get("curtailment_id"),
+                        "actor_name": facts.get("actor_name"),
+                        "original_end_date": facts.get("original_end_date"),
+                        "curtailed_end_date": facts.get("curtailed_end_date"),
+                        "curtailed_day_type": facts.get("curtailed_day_type"),
+                        "days_to_refund": str(facts.get("days_to_refund", "0")),
+                        "new_days": str(facts.get("new_days", "0")),
+                        "original_days": str(facts.get("original_days", "0")),
+                        "decision_note": facts.get("decision_note"),
+                        "balances": facts.get("balances", []),
+                    },
+                ),
+                drop_actor_cc=True,
+            )
+        ]
+
+    if event == CURTAILMENT_REJECTED:
+        return [
+            spec(
+                CURTAILMENT_REJECTED,
+                [employee_email],
+                approver_emails,
+                f"curtailment_rejected:{facts.get('curtailment_id')}",
+                _payload(
+                    facts,
+                    {
+                        "curtailment_id": facts.get("curtailment_id"),
+                        "actor_name": facts.get("actor_name"),
+                        "original_end_date": facts.get("original_end_date"),
+                        "curtailed_end_date": facts.get("curtailed_end_date"),
+                        "curtailed_day_type": facts.get("curtailed_day_type"),
+                        "decision_note": facts.get("decision_note"),
+                    },
+                ),
+                drop_actor_cc=True,
+            )
+        ]
+
     raise ValueError(f"Unknown email event '{event}'.")
 
 
 def working_days_waiting(
     submitted_date: date, today: date, weekend_days, holidays
 ) -> int:
-    """Working days strictly AFTER `submitted_date`, up to and including `today`.
-
-    Re-uses the pure day-calculation engine, in <=366-day chunks so the engine's
-    range limit is never hit.
-    """
+    """Count working days strictly after `submitted_date` up to `today`."""
     if today <= submitted_date:
         return 0
 
@@ -280,7 +443,6 @@ def is_overdue(
 
 
 def backoff_seconds(attempt_number: int) -> int:
-    """60s, 5min, 30min, 2h, 12h — then stay at 12h."""
     if attempt_number < 1:
         attempt_number = 1
     index = min(attempt_number, len(BACKOFF_SECONDS)) - 1
@@ -292,9 +454,7 @@ def next_state_after_failure(attempts: int, max_attempts: int) -> str:
 
 
 def sanitize_header(text: str | None, limit: int = MAX_HEADER_LENGTH) -> str:
-    """Strip CR/LF and control characters so a header cannot be injected."""
-    # Replace line breaks with a space FIRST, so removing them cannot glue two
-    # words together; then drop any remaining control characters.
+    """Strip line breaks and control characters from an email header value."""
     flattened = (
         (text or "").replace("\r", " ").replace("\n", " ").replace("\t", " ")
     )

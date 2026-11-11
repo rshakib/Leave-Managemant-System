@@ -1,9 +1,4 @@
-"""Seed the usual company leave types with small, demo-friendly quotas.
-
-    ./venv/bin/python -m app.cli.seed_leave_types
-
-Idempotent by code: an existing type is left exactly as it is.
-"""
+"""Seed standard leave types (``python -m app.cli.seed_leave_types``)."""
 
 import asyncio
 import sys
@@ -14,7 +9,6 @@ from sqlalchemy import select
 from app.db.session import async_session_factory
 from app.models.leave_type import LeaveType
 
-# code, name, quota, half day, carry forward, max carry, attachment after N days
 TYPES = [
     ("AL", "Annual Leave", "10", True, True, "5", None),
     ("SL", "Sick Leave", "10", True, False, "0", 3),

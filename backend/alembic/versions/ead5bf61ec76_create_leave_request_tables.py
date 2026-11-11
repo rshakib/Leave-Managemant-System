@@ -3,9 +3,6 @@
 Revision ID: ead5bf61ec76
 Revises: 8b7c1970e916
 Create Date: 2026-10-25 16:33:22.158067
-
-Creates `leave_request`, `leave_request_allocation` (the per-year split, D-05)
-and `leave_request_approval`, and enables Row Level Security on all three.
 """
 from typing import Sequence, Union
 

@@ -17,20 +17,15 @@ from app.models.base import BaseModel
 
 
 class AccrualMode(str, Enum):
-    """How a leave type is credited. Only FIXED is implemented in v1 (D-03)."""
-
     FIXED = "fixed"
     MONTHLY = "monthly"
 
 
 def _normalise_code(value: str) -> str:
-    """Leave-type codes are stored uppercase and trimmed (DECISIONS D-58)."""
     return value.strip().upper()
 
 
 class LeaveType(BaseModel, SQLModel, table=True):
-    """A kind of leave (Annual, Sick, ...). Named `leave_type` in the database."""
-
     __tablename__ = "leave_type"
     __table_args__ = (
         CheckConstraint("default_quota >= 0", name="ck_leave_type_default_quota"),
@@ -50,7 +45,6 @@ class LeaveType(BaseModel, SQLModel, table=True):
     code: str = Field(unique=True, nullable=False, max_length=20)
     name: str = Field(unique=True, nullable=False, max_length=100)
     default_quota: Decimal = Field(sa_type=Numeric(5, 2), nullable=False)
-    # Stored as VARCHAR + CHECK rather than a native PostgreSQL ENUM (D-42).
     accrual_mode: AccrualMode = Field(
         sa_column=Column(String(20), nullable=False, server_default=text("'fixed'")),
     )
@@ -72,8 +66,6 @@ class LeaveType(BaseModel, SQLModel, table=True):
         sa_column=Column(Boolean, nullable=False, server_default=text("true")),
     )
 
-
-# --- Pydantic-only models (never a database table) -------------------------
 
 _QUOTA_FIELD = dict(ge=0, max_digits=5, decimal_places=2)
 

@@ -1,14 +1,20 @@
 import { useEffect, useState } from 'react'
 import { Alert, Button, Form, Spinner } from 'react-bootstrap'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import Icon from '../components/Icon.jsx'
 import { errorMessage, retryAfterSeconds } from '../api/client'
 import { useAuth } from '../auth/AuthContext.jsx'
+import { getSafeRedirectPath } from '../auth/redirectUtils.js'
 
 export default function LoginPage() {
   const { user, login, sessionExpired } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
+
+  const redirectTarget = getSafeRedirectPath(searchParams.get('next') || location.state?.from)
+  const isSwitchFlow = searchParams.get('switch') === '1'
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -24,7 +30,7 @@ export default function LoginPage() {
   }, [countdown])
 
   if (user) {
-    return <Navigate to="/" replace />
+    return <Navigate to={redirectTarget || '/'} replace />
   }
 
   const handleSubmit = async (event) => {
@@ -35,7 +41,7 @@ export default function LoginPage() {
     try {
       const me = await login(email, password)
       // An admin-chosen password must be replaced before anything else (D-190).
-      navigate(me?.must_change_password ? '/account' : '/', { replace: true })
+      navigate(me?.must_change_password ? '/account' : redirectTarget || '/', { replace: true })
     } catch (err) {
       setError(errorMessage(err, 'Could not log in. Please try again.'))
       const seconds = retryAfterSeconds(err)
@@ -64,6 +70,11 @@ export default function LoginPage() {
         {sessionExpired && (
           <Alert variant="warning">
             Your session has expired, please sign in again.
+          </Alert>
+        )}
+        {!sessionExpired && (isSwitchFlow || redirectTarget) && (
+          <Alert variant="info">
+            Sign in with an account that has permission to open the requested page.
           </Alert>
         )}
         {error && <Alert variant="danger">{error}</Alert>}

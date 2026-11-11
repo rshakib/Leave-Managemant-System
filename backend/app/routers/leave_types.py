@@ -43,11 +43,6 @@ def _reject_monthly(mode: AccrualMode) -> None:
 
 
 async def _live_allocation_count(session: AsyncSession, leave_type_id: int) -> int:
-    """Assignments with a positive allocation in a leave year that is not closed.
-
-    Assignments in closed years are history and never block deactivation
-    (DECISIONS D-56).
-    """
     count = await session.scalar(
         select(func.count())
         .select_from(EmployeeLeaveType)
@@ -102,7 +97,6 @@ async def create_leave_type(
 
     data = payload.model_dump()
     if not data["carry_forward_allowed"]:
-        # Carry-forward disabled always means zero days (DECISIONS D-22).
         data["max_carry_forward_days"] = Decimal("0")
 
     leave_type = LeaveType(**data)
@@ -164,9 +158,6 @@ async def update_leave_type(
     if "name" in data and data["name"] != leave_type.name:
         await _ensure_name_free(session, data["name"], exclude_id=type_id)
 
-    # DECISIONS D-56: a leave type that is still allocated to someone in an open
-    # leave year cannot be deactivated — deactivate would silently cut off leave
-    # people are entitled to. Assignments in closed years never block.
     if data.get("is_active") is False and leave_type.is_active:
         live = await _live_allocation_count(session, type_id)
         if live:

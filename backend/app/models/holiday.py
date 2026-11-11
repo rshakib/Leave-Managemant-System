@@ -17,29 +17,12 @@ from app.models.base import BaseModel
 
 
 class HolidayType(str, Enum):
-    """Whether a holiday is subtracted from leave (see DECISIONS D-71)."""
-
     PUBLIC = "PUBLIC"
     COMPANY = "COMPANY"
     OPTIONAL = "OPTIONAL"
 
 
 class Holiday(BaseModel, SQLModel, table=True):
-    """A holiday, one row per date (DECISIONS D-07).
-
-    Scope: `division_id`/`department_id` NULL means "applies to everyone";
-    a department also stores its division.
-
-    Duplicate trap: `UNIQUE(date, division_id, department_id)` would NOT stop
-    duplicates when the scope columns are NULL (two NULLs are never equal), so
-    the index below compares `COALESCE(division_id, 0)` and
-    `COALESCE(department_id, 0)` instead — an "expression index". `0` is safe
-    as a stand-in for NULL because real ids start at 1.
-
-    Note: the `date` column is annotated as `datetime.date` (not bare `date`)
-    because a field may not share its name with its own type annotation.
-    """
-
     __tablename__ = "holiday"
     __table_args__ = (
         CheckConstraint(
@@ -69,13 +52,8 @@ class Holiday(BaseModel, SQLModel, table=True):
     )
 
 
-# --- Pydantic-only models (never a database table) -------------------------
-
-
 class HolidayCreate(SQLModel):
     leave_year_id: int
-    # Either a single `date`, or `date_from` + `date_to` (the API expands a
-    # range into one row per date).
     date: datetime.date | None = None
     date_from: datetime.date | None = None
     date_to: datetime.date | None = None

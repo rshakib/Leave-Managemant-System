@@ -13,7 +13,7 @@ import {
 import { useSearchParams } from 'react-router-dom'
 
 import api, { errorMessage } from '../api/client'
-import DateFilter from '../components/DateFilter.jsx'
+import DateFilter, { getLastMonthRange } from '../components/DateFilter.jsx'
 import NoOptions from '../components/NoOptions.jsx'
 import { useAutoRefresh } from '../hooks/useAutoRefresh.js'
 
@@ -41,7 +41,7 @@ const FILTER_KEYS = [
   'include_reason',
 ]
 
-function emptyForm() {
+function emptyForm(defaultDates = getLastMonthRange()) {
   return {
     leave_year_id: '',
     division_id: '',
@@ -49,15 +49,17 @@ function emptyForm() {
     employee_id: '',
     leave_type_id: '',
     status: '',
-    date_from: '',
-    date_to: '',
+    date_from: defaultDates ? defaultDates.from : '',
+    date_to: defaultDates ? defaultDates.to : '',
     include_inactive: false,
     include_reason: false,
   }
 }
 
 function formFromParams(searchParams) {
-  const form = emptyForm()
+  const defaultDates = getLastMonthRange()
+  const isDateAll = searchParams.get('date_all') === 'true'
+  const form = emptyForm(isDateAll ? null : defaultDates)
   FILTER_KEYS.forEach((key) => {
     const value = searchParams.get(key)
     if (value === null) return
@@ -79,11 +81,15 @@ function paramsFromForm(tab, form, offset) {
     }
     if (form[key] !== '') params[key] = form[key]
   })
+  if (!form.date_from && !form.date_to) {
+    params.date_all = 'true'
+  }
   return params
 }
 
 export default function ReportsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const defaultDates = useMemo(() => getLastMonthRange(), [])
   const [reloadKey, setReloadKey] = useState(0)
   const tab = searchParams.get('tab') === 'history' ? 'history' : 'balances'
   const offset = Number(searchParams.get('offset') ?? 0)
@@ -122,23 +128,27 @@ export default function ReportsPage() {
         setLeaveYears(y.data)
 
         const active = y.data.find((year) => year.is_active)
+        const actId = active ? String(active.id) : ''
         if (active) {
-          const actId = String(active.id)
           setForm((prev) => ({
             ...prev,
             leave_year_id: prev.leave_year_id || actId,
           }))
-          if (!searchParams.get('leave_year_id')) {
-            setSearchParams(
-              (prevParams) => {
-                const next = new URLSearchParams(prevParams)
-                next.set('leave_year_id', actId)
-                return next
-              },
-              { replace: true },
-            )
-          }
         }
+        setSearchParams(
+          (prevParams) => {
+            const next = new URLSearchParams(prevParams)
+            if (actId && !next.has('leave_year_id')) {
+              next.set('leave_year_id', actId)
+            }
+            if (!next.has('date_from') && !next.has('date_to') && next.get('date_all') !== 'true') {
+              next.set('date_from', defaultDates.from)
+              next.set('date_to', defaultDates.to)
+            }
+            return next
+          },
+          { replace: true },
+        )
       } catch (err) {
         setError(errorMessage(err, 'Could not load the filter options.'))
       }
@@ -160,13 +170,17 @@ export default function ReportsPage() {
     if (!raw.leave_year_id && activeYearId) {
       raw.leave_year_id = activeYearId
     }
-    return paramsFromForm(tab, raw, offset)
+    const params = paramsFromForm(tab, raw, offset)
+    delete params.date_all
+    return params
   }, [tab, searchParams, offset, activeYearId])
 
   useEffect(() => {
     let cancelled = false
     const load = async () => {
-      setLoading(true)
+      if (!report) {
+        setLoading(true)
+      }
       try {
         const { data } = await api.get(`/reports/${tab}`, {
           params: { ...apiParams, limit: PAGE_SIZE },
@@ -188,6 +202,9 @@ export default function ReportsPage() {
     }
   }, [tab, apiParams, reloadKey])
 
+  // Live real-time update (event-driven, silent background update with no spinner)
+  useAutoRefresh(() => setReloadKey((key) => key + 1))
+
   const update = (key, value) => setForm({ ...form, [key]: value })
 
   const apply = () => {
@@ -196,9 +213,30 @@ export default function ReportsPage() {
     setSearchParams(params)
   }
 
+  const resetToLastMonth = () => {
+    const range = getLastMonthRange()
+    const nextForm = {
+      ...form,
+      date_from: range.from,
+      date_to: range.to,
+    }
+    setForm(nextForm)
+    const params = paramsFromForm(tab, nextForm, 0)
+    params.tab = tab
+    delete params.date_all
+    setSearchParams(params)
+  }
+
   const reset = () => {
-    setForm({ ...emptyForm(), leave_year_id: activeYearId })
-    const nextParams = { tab }
+    const range = getLastMonthRange()
+    const newForm = {
+      ...emptyForm(range),
+      leave_year_id: activeYearId,
+    }
+    setForm(newForm)
+    const nextParams = paramsFromForm(tab, newForm, 0)
+    nextParams.tab = tab
+    delete nextParams.date_all
     if (activeYearId) nextParams.leave_year_id = activeYearId
     setSearchParams(nextParams)
   }
@@ -272,9 +310,6 @@ export default function ReportsPage() {
   if (tab === 'history' && formFromParams(searchParams).include_reason) {
     historyColumns.push('Reason')
   }
-
-  // Live view: reload after any change, when the tab returns, or on the poll.
-  useAutoRefresh(() => setReloadKey((key) => key + 1))
 
   return (
     <>
@@ -416,6 +451,19 @@ export default function ReportsPage() {
           }
           label="Date filter"
         />
+        {(!form.date_from || !form.date_to || form.date_from !== defaultDates.from || form.date_to !== defaultDates.to) && (
+          <Col md="auto" sm={6} xs={12} className="d-flex align-items-end">
+            <Button
+              variant="link"
+              size="sm"
+              className="p-0 text-decoration-none small text-muted pb-1"
+              onClick={resetToLastMonth}
+              title="Reset date filter to default last 1 month"
+            >
+              Reset to last 1 month
+            </Button>
+          </Col>
+        )}
 
         <Col md={12} className="d-flex align-items-center gap-4">
           <Form.Check

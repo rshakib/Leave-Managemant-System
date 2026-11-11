@@ -24,14 +24,10 @@ from app.services.audit import record, snapshot
 from app.services.auth_service import revoke_all
 from app.services.password_rules import requires_password_change
 from app.services.security_rules import check_password_policy
-from app.services.approvers import (
-    active_approver_count_for_others,
-    ensure_supervisor_is_approver,
-)
+from app.services.approvers import active_approver_count_for_others
 
 router = APIRouter(prefix="/employees", tags=["employees"])
 
-# Exactly the fields we audit — never password_hash.
 EMPLOYEE_FIELDS = (
     "employee_code",
     "full_name",
@@ -60,7 +56,6 @@ async def _get_employee_or_404(session: AsyncSession, employee_id: int) -> Emplo
 async def _validate_placement(
     session: AsyncSession, division_id: int, department_id: int
 ) -> None:
-    """The department must belong to the division, and both must be active."""
     division = await session.get(Division, division_id)
     if division is None:
         raise HTTPException(
@@ -97,10 +92,6 @@ async def _validate_placement(
 async def _creates_cycle(
     session: AsyncSession, employee_id: int, supervisor_id: int
 ) -> bool:
-    """Walk up the supervisor chain from `supervisor_id`.
-
-    If we reach `employee_id`, adding this supervisor would close a loop.
-    """
     seen: set[int] = set()
     current: int | None = supervisor_id
     while current is not None:
@@ -141,7 +132,7 @@ async def _validate_supervisor(
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="That supervisor would create a circular reporting chain.",
+            detail=f"Cannot assign {supervisor.full_name} as supervisor: that creates a circular reporting chain (they already report to this employee).",
         )
 
 
@@ -192,11 +183,9 @@ async def create_employee(
     )
     session.add(employee)
     try:
-        await session.flush()  # assigns employee.id
+        await session.flush()
         for role in roles:
             session.add(EmployeeRole(employee_id=employee.id, role=role))
-        # FR-APR-2: a supervisor set at creation also becomes an approver.
-        await ensure_supervisor_is_approver(session, employee)
         await record(
             session, actor.id, "employee", employee.id, "CREATE",
             new={**snapshot(employee, EMPLOYEE_FIELDS),
@@ -265,7 +254,6 @@ async def update_employee(
     before = snapshot(employee, EMPLOYEE_FIELDS)
     old_roles = sorted(role.value for role in await load_roles(session, employee_id))
 
-    # Only a real CHANGE of supervisor triggers the approver rule (D-80).
     supervisor_changed = (
         "supervisor_id" in data and data["supervisor_id"] != employee.supervisor_id
     )
@@ -304,8 +292,6 @@ async def update_employee(
             )
 
     if data.get("is_active") is False and employee.is_active:
-        # Deactivating here revokes login automatically: get_current_user()
-        # rejects inactive employees, finishing the Phase-4 TODO (FR-EMP-3).
         reports = await _active_reports(session, employee_id)
         if reports:
             raise HTTPException(
@@ -316,7 +302,6 @@ async def update_employee(
                 ),
             )
 
-        # DECISIONS D-81: an active approver cannot be deactivated.
         approving_for = await active_approver_count_for_others(session, employee_id)
         if approving_for:
             raise HTTPException(
@@ -328,7 +313,6 @@ async def update_employee(
                 ),
             )
 
-        # DECISIONS D-94: unfinished work blocks deactivation too.
         pending_requests = await pending_request_count(session, employee_id)
         pending_decisions = await pending_approval_count(session, employee_id)
         if pending_requests or pending_decisions:
@@ -345,7 +329,6 @@ async def update_employee(
     if "roles" in data:
         new_roles = set(with_employee_role(payload.roles or []))
         if Role.APPROVER not in new_roles:
-            # DECISIONS D-82: cannot drop APPROVER while still approving for others.
             approving_for = await active_approver_count_for_others(
                 session, employee_id
             )
@@ -370,7 +353,6 @@ async def update_employee(
                     ),
                 )
 
-    # The password is handled separately so that NO value is ever recorded.
     new_password = data.pop("password", None)
 
     for field, value in data.items():
@@ -382,16 +364,12 @@ async def update_employee(
         if problems:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, problems)
         employee.password_hash = hash_password(new_password)
-        # An administrator who types somebody's password knows it, so that person
-        # must choose their own at the next sign-in. Resetting your OWN password
-        # does not force a change (D-190).
         employee.must_change_password = requires_password_change(
             actor_id=actor.id,
             target_id=employee_id,
             password_set=True,
             explicit=payload.must_change_password,
         )
-        # A password reset logs the employee out everywhere (D-163).
         await revoke_all(session, employee_id)
 
     if "roles" in data:
@@ -401,12 +379,6 @@ async def update_employee(
         for role in with_employee_role(payload.roles or []):
             session.add(EmployeeRole(employee_id=employee_id, role=role))
 
-    if supervisor_changed:
-        # FR-APR-2: the NEW supervisor becomes an approver; nobody is removed.
-        await ensure_supervisor_is_approver(session, employee)
-
-    # --- audit: one row per distinct business action ---------------------
-    # A diff style old/new: only the keys that actually changed.
     after = snapshot(employee, EMPLOYEE_FIELDS)
     changes = {
         key: value for key, value in after.items() if before.get(key) != value
@@ -429,11 +401,9 @@ async def update_employee(
                 old={"roles": old_roles}, new={"roles": new_roles},
             )
     if data.get("is_active") is False and not employee.is_active:
-        # Deactivation revokes every session in the same transaction.
         await revoke_all(session, employee_id)
 
     if new_password is not None:
-        # Deliberately no old/new values at all: even a hash is secret material.
         await record(
             session, actor.id, "employee", employee_id, "PASSWORD_RESET",
             reason="password reset by an administrator",

@@ -79,13 +79,7 @@ async def assign_leave_type(
     session: AsyncSession = Depends(get_session),
     actor: Employee = Depends(get_current_user),
 ) -> LeaveBalanceRead:
-    """Assign (or re-allocate) a leave type for one employee — an UPSERT.
-
-    Both the assignment row and the matching `leave_balance.allocated` are
-    written in the SAME transaction (DECISIONS D-25).
-    """
     year = await resolve_leave_year(session, payload.leave_year_id)
-    # Phase 15: take the SHARED leave-year lock, then re-check it is not closed.
     assert_years_open(await lock_years_shared(session, [year.id]))
 
     employee = await session.get(Employee, payload.employee_id)
@@ -121,7 +115,6 @@ async def assign_leave_type(
     before_allocated = balance.allocated if balance is not None else None
     first_time = balance is None
 
-    # Check if this employee previously had used days transferred to AL
     transfer = await session.scalar(
         select(LeaveAssignmentTransfer).where(
             LeaveAssignmentTransfer.employee_id == employee.id,
@@ -191,8 +184,6 @@ async def assign_leave_type(
             balance.used = restored_used
 
     await session.flush()
-    # Read the stored value back: Numeric(5,2) gives exactly "25.00", while the
-    # request body may carry "25". The audit must show what the ROW holds.
     await session.refresh(balance)
     await record(
         session, actor.id, "leave_assignment", balance.id,
@@ -201,7 +192,6 @@ async def assign_leave_type(
         new={
             "allocated": balance.allocated,
             "leave_year_id": year.id,
-            # PART 0b: context lives in the values, not in `reason`.
             "employee_code": employee.employee_code,
             "leave_type_code": leave_type.code,
         },
@@ -210,9 +200,6 @@ async def assign_leave_type(
     try:
         await session.commit()
     except IntegrityError:
-        # Two requests for the same (employee, type, year) can both see "no row"
-        # and both INSERT. The unique constraint lets only one win; the loser
-        # lands here and is told to retry (its retry then takes the UPDATE path).
         await session.rollback()
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -230,15 +217,6 @@ async def remove_leave_assignment(
     session: AsyncSession = Depends(get_session),
     actor: Employee = Depends(get_current_user),
 ):
-    """Remove a leave assignment.
-
-    If the employee has pending requests for this leave type, removal is blocked.
-    If the employee has already used days from this leave type:
-    - Those used days are transferred to the employee's Annual Leave (AL) balance.
-    - A record is saved in LeaveAssignmentTransfer so that if the leave type is
-      re-assigned later, the used days are deducted from the new assignment and
-      refunded back to Annual Leave.
-    """
     balance = await session.get(LeaveBalance, balance_id)
     if balance is None:
         raise HTTPException(
@@ -353,13 +331,7 @@ async def bulk_assign(
     session: AsyncSession = Depends(get_session),
     actor: Employee = Depends(get_current_user),
 ) -> BulkAssignmentResult:
-    """Assign several leave types to a whole division/department (or a list).
-
-    Everything runs in ONE transaction (all-or-nothing, DECISIONS D-32). Rows
-    that cannot be written are skipped and reported instead of failing the run.
-    """
     year = await resolve_leave_year(session, payload.leave_year_id)
-    # Phase 15: same SHARED lock + re-check as the single assignment.
     assert_years_open(await lock_years_shared(session, [year.id]))
 
     if payload.division_id is not None:
@@ -494,8 +466,6 @@ async def bulk_assign(
                     balance.used = restored_used
             touched_ids.append(employee.id)
 
-    # ONE audit row for the whole bulk run (D-141): counts + the first 50
-    # affected employees, so the row stays small whatever the size of the run.
     await record(
         session, actor.id, "leave_assignment", None, "BULK_ASSIGN",
         new={

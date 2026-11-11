@@ -97,7 +97,8 @@ export default function HomePage() {
         setActiveYear(yearRes.value.data.find((year) => year.is_active) ?? null)
       }
       if (countRes.status === 'fulfilled' && countRes.value) {
-        setPendingApprovals(countRes.value.data.pending)
+        const d = countRes.value.data
+        setPendingApprovals(d.total ?? ((d.pending ?? 0) + (d.early_returns ?? 0)))
       }
 
       if (isAdmin) {

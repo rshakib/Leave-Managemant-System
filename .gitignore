@@ -25,3 +25,6 @@ graphify-out/
 
 # Commandcode
 .commandcode/
+
+# Private/remote database seeding scripts (local only, never push to git)
+backend/app/scripts/

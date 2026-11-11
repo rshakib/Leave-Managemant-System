@@ -27,8 +27,6 @@ class CurtailmentStatus(str, Enum):
 
 
 class LeaveCurtailment(BaseModel, SQLModel, table=True):
-    """Early return / curtailment request for an approved leave request."""
-
     __tablename__ = "leave_curtailment"
     __table_args__ = (
         CheckConstraint("curtailed_end_date <= original_end_date", name="ck_curtailment_dates"),

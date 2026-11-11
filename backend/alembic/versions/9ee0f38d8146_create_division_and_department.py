@@ -3,15 +3,6 @@
 Revision ID: 9ee0f38d8146
 Revises: 69d0b70a50c9
 Create Date: 2026-10-23 01:27:48.922245
-
-Creates the `division` and `department` tables (FR-ORG-1, FR-ORG-2) and enables
-Row Level Security on both.
-
-RLS note: Supabase exposes tables through a public "Data API" that connects as
-the `anon`/`authenticated` roles. Enabling RLS with no policies denies those
-roles all access. Our backend connects as the table owner (`postgres`), and a
-table owner bypasses RLS unless FORCE ROW LEVEL SECURITY is set — which we do
-not set. So the backend keeps full access while the public API sees nothing.
 """
 from typing import Sequence, Union
 
@@ -59,6 +50,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    # Dropping a table also drops its RLS settings, so no explicit DISABLE.
     op.drop_table('department')
     op.drop_table('division')

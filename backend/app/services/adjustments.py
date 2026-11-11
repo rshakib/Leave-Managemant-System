@@ -1,27 +1,4 @@
-"""Manual leave-balance adjustments (NFR-1).
-
-One adjustment = one ledger row + one audit row + one balance change, all in the
-caller's single transaction.
-
-LOCK ORDER (the global one, see `services/locking.py` and `services/closing.py`):
-    leave year (SHARED) -> balance row (FOR UPDATE)
-We deliberately do NOT lock the employee row: `submit()` locks
-year -> employee -> balance, while this path goes year -> balance, so no
-transaction can ever wait for another in a circle. Because the balance row is
-locked FOR UPDATE, two adjustments on the same balance are applied one after the
-other (the ledger's before/after values form a chain), and an approval or a
-cancellation touching the same balance serialises with us too.
-
-Closed years ARE adjustable on purpose: the whole point is to repair history
-(D-157). The year is still locked SHARED, which is what a closing takes
-EXCLUSIVELY, so an adjustment and a closing can never interleave.
-
-Deliberately NO email: FR-NOT-1 lists six events and a balance adjustment is
-not one of them (D-195). The employee sees the adjustment, with its reason, on
-"My balances" (GET /leave-balances/me/adjustments), and the append-only ledger
-keeps it forever. Adding a seventh event would change the agreed notification
-set, so it is a product decision, not an unfinished task.
-"""
+"""Manual leave-balance adjustment service."""
 
 import datetime
 
@@ -67,12 +44,9 @@ async def adjust(
             "employee for that leave year first.",
         )
 
-    # Lock order: year SHARED first, then the balance row itself.
+    # Lock year SHARED before balance row FOR UPDATE to preserve global lock order.
     years = await lock_years_shared(session, [balance.leave_year_id])
 
-    # Re-read FRESH under the row lock (the row may have changed while we waited).
-    # WITHOUT `with_for_update()` two simultaneous adjustments both read the old
-    # value and one update is lost — the verification caught exactly that.
     balance = await session.scalar(
         select(LeaveBalance)
         .where(LeaveBalance.id == balance_id)
@@ -111,8 +85,6 @@ async def adjust(
     session.add(entry)
     await session.flush()
 
-    # FAIL CLOSED (D-141): the audit row is part of the fact. If it cannot be
-    # written, the balance change and the ledger row roll back with it.
     await record(
         session,
         actor.id,
@@ -150,7 +122,6 @@ ALLOWED_FIELDS = tuple(item.value for item in AdjustmentField)
 
 
 def reject_unknown_field(field) -> None:
-    """Backstop for the router: never trust a client-supplied field name."""
     if field not in ALLOWED_FIELDS:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,

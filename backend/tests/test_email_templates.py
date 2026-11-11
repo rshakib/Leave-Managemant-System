@@ -4,9 +4,13 @@ import pytest
 
 from app.services.email_rules import (
     APPROVED,
+    APPROVED_SUPERVISOR,
     APPROVER_ACTED,
     CANCELLED,
     CANCELLED_EMPLOYEE,
+    CURTAILMENT_APPROVED,
+    CURTAILMENT_REJECTED,
+    CURTAILMENT_SUBMITTED,
     PASSWORD_RESET,
     REJECTED,
     REMINDER,
@@ -20,7 +24,9 @@ BASE = "http://localhost:5173"
 def payload(**overrides):
     data = {
         "request_id": 42,
+        "employee_code": "EMP-042",
         "employee_name": "Alice Example",
+        "supervisor_name": "Bob Supervisor",
         "leave_type_code": "AL",
         "leave_type_name": "Annual Leave",
         "start_date": "2026-11-02",
@@ -36,6 +42,15 @@ def payload(**overrides):
         "cancelled_by_name": "HR Admin",
         "cancel_reason": "company shutdown",
         "approver_name": "Bob",
+        "curtailment_id": 99,
+        "original_end_date": "2026-11-05",
+        "curtailed_end_date": "2026-11-03",
+        "curtailed_day_type": "FULL_DAY",
+        "days_to_refund": "2.00",
+        "new_days": "2.00",
+        "original_days": "4.00",
+        "decision_note": "Approved early return",
+        "curtailment_reason": "Finished task early",
         "overdue": [
             {
                 "employee_name": "Alice",
@@ -53,7 +68,20 @@ def payload(**overrides):
 
 @pytest.mark.parametrize(
     "event",
-    [SUBMITTED, APPROVER_ACTED, APPROVED, REJECTED, CANCELLED, CANCELLED_EMPLOYEE, REMINDER, PASSWORD_RESET],
+    [
+        SUBMITTED,
+        APPROVER_ACTED,
+        APPROVED,
+        APPROVED_SUPERVISOR,
+        REJECTED,
+        CANCELLED,
+        CANCELLED_EMPLOYEE,
+        REMINDER,
+        PASSWORD_RESET,
+        CURTAILMENT_SUBMITTED,
+        CURTAILMENT_APPROVED,
+        CURTAILMENT_REJECTED,
+    ],
 )
 def test_every_event_renders_a_subject_text_and_html(event):
     data = payload(token="secure_test_token_123")

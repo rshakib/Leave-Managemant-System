@@ -3,16 +3,6 @@
 Revision ID: c4e60f6f17d8
 Revises: 8e050ee9b800
 Create Date: 2026-10-25 15:52:16.773467
-
-Creates the leave-type assignment and balance tables (FR-LT-2, FR-LT-3) and
-enables Row Level Security on both, as in earlier phases.
-
-Notes:
-- `leave_balance.carried_forward` follows DECISIONS D-02 (not the schema's
-  `carried_in`).
-- `ck_leave_balance_available_not_negative` is the database-level guarantee
-  that `allocated + carried_forward - used - pending` is never negative.
-- `available` is NOT a column: it is computed in the API's Read model.
 """
 from typing import Sequence, Union
 

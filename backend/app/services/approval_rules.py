@@ -1,8 +1,4 @@
-"""The "all must approve" decision rules, as a PURE function (FR-APR-3).
-
-No database, no HTTP, no clock — so the same rules can be unit-tested directly
-and reused by the service.
-"""
+"""Leave request approval decision rules."""
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -26,7 +22,6 @@ class BalanceEffect(str, Enum):
 
 
 class ApprovalError(Exception):
-    """A rule was broken; `http_status` says how the API should answer."""
 
     def __init__(self, code: str, message: str, http_status: int) -> None:
         super().__init__(message)
@@ -44,7 +39,6 @@ class Decision:
 
 
 def _text(value) -> str:
-    """Accept plain strings or the model enums."""
     return value.value if hasattr(value, "value") else str(value)
 
 
@@ -55,16 +49,11 @@ def decide(
     actor_id: int,
     action,
 ) -> Decision:
-    """Work out what one approve/reject does to the whole request.
-
-    `approvals` is a list of `(approver_id, status)` pairs.
-    """
+    """Compute the request, approval, and balance transitions for an approval action."""
     status = _text(request_status)
     chosen = Action(_text(action))
     rows = [(approver_id, _text(row_status)) for approver_id, row_status in approvals]
 
-    # The requester can never decide their own request. This returns 403 (not a
-    # hidden 404): the requester already knows their request exists.
     if actor_id == request_employee_id:
         raise ApprovalError(
             "own_request",
@@ -72,8 +61,6 @@ def decide(
             403,
         )
 
-    # No row for this actor -> the same 404 as a missing request, so the
-    # existence of a request is never leaked to a stranger.
     actor_status = next((row for approver_id, row in rows if approver_id == actor_id), None)
     if actor_status is None:
         raise ApprovalError("not_found", "Leave request not found.", 404)
@@ -100,7 +87,6 @@ def decide(
         )
 
     if chosen is Action.APPROVE:
-        # Approved only when nobody else is still PENDING.
         still_pending = any(
             row == PENDING for approver_id, row in rows if approver_id != actor_id
         )
@@ -118,8 +104,6 @@ def decide(
             balance_effect=BalanceEffect.MOVE_TO_USED,
         )
 
-    # REJECT: close every other PENDING approval. Approvals that were already
-    # APPROVED keep their status (history stays truthful).
     skipped = [
         approver_id
         for approver_id, row in rows

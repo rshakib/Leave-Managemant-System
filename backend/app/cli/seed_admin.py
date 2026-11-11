@@ -1,12 +1,4 @@
-"""Create the first administrator.
-
-Usage (from the backend/ directory, with the virtualenv activated):
-
-    python -m app.cli.seed_admin
-    python -m app.cli.seed_admin --force   # create another admin anyway
-
-The password is read with getpass (never an argument, never printed).
-"""
+"""Create the first administrator user (``python -m app.cli.seed_admin``)."""
 
 import argparse
 import asyncio
@@ -37,7 +29,6 @@ async def _has_active_admin(session) -> bool:
 
 
 async def _ensure_org(session) -> tuple[int, int]:
-    """Return (division_id, department_id), creating defaults when missing."""
     division = await session.scalar(select(Division).order_by(Division.id).limit(1))
     if division is None:
         division = Division(name=DEFAULT_DIVISION_NAME)

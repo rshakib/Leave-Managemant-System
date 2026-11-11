@@ -12,12 +12,6 @@ HEARTBEAT_SECONDS = 25
 
 @router.get("/events")
 async def stream_changes():
-    """A one-way stream that says only "something changed" (a version number).
-
-    No data, no names, no token needed: the browser refetches its own screens with
-    its normal authenticated requests. That keeps the stream harmless if it leaks.
-    """
-
     async def generator():
         queue = events.subscribe()
         try:

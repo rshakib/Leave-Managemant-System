@@ -19,13 +19,6 @@ from app.models.base import BaseModel
 
 
 class RefreshToken(BaseModel, SQLModel, table=True):
-    """One issued refresh token (DECISIONS D-163).
-
-    Only the SHA-256 HASH of the token is stored, never the token itself, and
-    never an IP address. The row is MUTABLE (revoked_at / replaced_at / last_used_at
-    change), so it inherits BaseModel.
-    """
-
     __tablename__ = "refresh_token"
     __table_args__ = (
         Index("ix_refresh_token_employee_active", "employee_id", "revoked_at"),
@@ -63,14 +56,6 @@ class RefreshToken(BaseModel, SQLModel, table=True):
 
 
 class LoginAttempt(BaseModel, SQLModel, table=True):
-    """One login try, for rate limiting and the admin view (DECISIONS D-164).
-
-    Deliberately NOT append-only (it inherits BaseModel): it is telemetry, and a
-    future cleanup job (16D) must be able to prune old rows. It holds no password
-    material at all — only the normalised email, a keyed HMAC of the IP, and the
-    outcome.
-    """
-
     __tablename__ = "login_attempt"
     __table_args__ = (
         Index("ix_login_attempt_email", "email_normalized", "created_at"),
@@ -87,11 +72,6 @@ class LoginAttempt(BaseModel, SQLModel, table=True):
 
 
 class PasswordResetToken(BaseModel, SQLModel, table=True):
-    """A time-limited, single-use token for password resets.
-
-    Stores only the SHA-256 hash of the token, never the plaintext token itself.
-    """
-
     __tablename__ = "password_reset_token"
     __table_args__ = (
         Index("ix_password_reset_token_hash", "token_hash", unique=True),
@@ -110,3 +90,24 @@ class PasswordResetToken(BaseModel, SQLModel, table=True):
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
     ip_hash: str | None = Field(default=None, max_length=64)
+
+
+class ApprovalActionToken(BaseModel, SQLModel, table=True):
+    __tablename__ = "approval_action_token"
+    __table_args__ = (
+        Index("ix_approval_action_token_hash", "token_hash", unique=True),
+        Index("ix_approval_action_token_approval", "approval_id", "expires_at"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True, sa_type=BigInteger)
+    approval_id: int = Field(
+        foreign_key="leave_request_approval.id", sa_type=BigInteger, nullable=False
+    )
+    token_hash: str = Field(nullable=False, max_length=64)
+    action: str = Field(nullable=False, max_length=20, default="APPROVE")
+    expires_at: datetime.datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
+    used_at: datetime.datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )

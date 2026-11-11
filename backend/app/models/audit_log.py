@@ -15,14 +15,6 @@ from app.services.audit_rules import changed_fields
 
 
 class AuditLog(SQLModel, table=True):
-    """Append-only audit trail (NFR-1, DECISIONS D-23/D-24).
-
-    Deliberately does NOT inherit `BaseModel`: an audit row is written once and
-    never changes, so the shared `updated_at` / `created_by` columns would be
-    noise — and `created_by` would duplicate `actor_id`. The table is protected
-    against changes by a database trigger (see the migration).
-    """
-
     __tablename__ = "audit_log"
     __table_args__ = (
         Index("ix_audit_log_entity", "entity_type", "entity_id", text("created_at DESC")),
@@ -35,11 +27,8 @@ class AuditLog(SQLModel, table=True):
         default=None, foreign_key="employee.id", sa_type=BigInteger, nullable=True
     )
     entity_type: str = Field(nullable=False, max_length=40)
-    # Nullable: some events have no single entity (for example a report export).
     entity_id: int | None = Field(default=None, sa_type=BigInteger, nullable=True)
     action: str = Field(nullable=False, max_length=40)
-    # none_as_null=True: a Python None becomes a real SQL NULL, not the JSON
-    # value "null", so `old_value IS NULL` means "there was no before value".
     old_value: dict | None = Field(
         default=None, sa_column=Column(JSONB(none_as_null=True), nullable=True)
     )
@@ -52,9 +41,6 @@ class AuditLog(SQLModel, table=True):
             DateTime(timezone=True), nullable=False, server_default=func.now()
         )
     )
-
-
-# --- Pydantic-only models --------------------------------------------------
 
 
 class AuditLogRead(SQLModel):
@@ -79,7 +65,6 @@ class AuditLogPage(SQLModel):
 
 
 def audit_read_rows(rows, names: dict[int, str]) -> list[AuditLogRead]:
-    """Attach the actor name and the list of changed keys."""
     return [
         AuditLogRead(
             id=row.id,

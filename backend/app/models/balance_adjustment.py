@@ -25,14 +25,6 @@ class AdjustmentField(str, Enum):
 
 
 class LeaveBalanceAdjustment(SQLModel, table=True):
-    """An append-only ledger of manual balance adjustments (NFR-1, D-155…D-160).
-
-    Deliberately does NOT inherit `BaseModel`: like `audit_log` this row is
-    written once and never changed (a database trigger refuses UPDATE/DELETE/
-    TRUNCATE), so `updated_at` would be a lie. A mistake is corrected by writing
-    an OPPOSITE adjustment, never by editing history.
-    """
-
     __tablename__ = "leave_balance_adjustment"
     __table_args__ = (
         CheckConstraint(
@@ -56,7 +48,6 @@ class LeaveBalanceAdjustment(SQLModel, table=True):
     balance_id: int = Field(
         foreign_key="leave_balance.id", sa_type=BigInteger, nullable=False
     )
-    # Copied from the balance so the ledger can be filtered without a join.
     employee_id: int = Field(
         foreign_key="employee.id", sa_type=BigInteger, nullable=False
     )
@@ -83,9 +74,6 @@ class LeaveBalanceAdjustment(SQLModel, table=True):
             DateTime(timezone=True), nullable=False, server_default=func.now()
         )
     )
-
-
-# --- Pydantic-only models --------------------------------------------------
 
 
 class AdjustmentCreate(SQLModel):

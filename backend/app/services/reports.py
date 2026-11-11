@@ -1,12 +1,4 @@
-"""Reporting queries shared by the JSON and CSV endpoints (NFR-4).
-
-Both endpoints call the SAME filter builder, so they can never disagree.
-JSON uses 3 queries (rows, count, summary) whatever the row count; the CSV export
-streams batches of 1000 rows and adds one query per batch.
-
-Every export is audited by the ROUTER (see routers/reports.py) and the audit
-row is committed BEFORE the first byte is streamed — see D-146.
-"""
+"""Leave balance and history reporting queries and CSV exporters."""
 
 import csv
 import datetime
@@ -63,9 +55,6 @@ class HistoryFilters:
     include_reason: bool = False
 
 
-# --- shared pieces ---------------------------------------------------------
-
-
 async def active_year_id(session: AsyncSession) -> int | None:
     return await session.scalar(
         select(LeaveYear.id).where(LeaveYear.is_active.is_(True)).limit(1)
@@ -97,9 +86,6 @@ async def check_department_belongs(
             f"{department.division_id}, not division {division_id}.",
             400,
         )
-
-
-# --- balances --------------------------------------------------------------
 
 
 def _balance_statement(filters: BalanceFilters, leave_year_id: int | None):
@@ -254,9 +240,6 @@ async def iter_balance_batches(
         offset += BATCH_SIZE
 
 
-# --- history ---------------------------------------------------------------
-
-
 def _history_statement(filters: HistoryFilters):
     approver = aliased(Employee)
     approvals_text = (
@@ -318,7 +301,6 @@ def _history_statement(filters: HistoryFilters):
         statement = statement.where(LeaveRequest.status == filters.status)
     if filters.leave_year_id is not None:
         statement = statement.where(LeaveRequest.leave_year_id == filters.leave_year_id)
-    # "date_from/date_to" means OVERLAP, not containment (see DECISIONS D-122).
     if filters.date_from is not None:
         statement = statement.where(LeaveRequest.end_date >= filters.date_from)
     if filters.date_to is not None:
@@ -447,9 +429,6 @@ async def iter_history_batches(session: AsyncSession, filters: HistoryFilters):
         offset += BATCH_SIZE
 
 
-# --- CSV chunks ------------------------------------------------------------
-
-
 def csv_chunk(header: list[str], rows: list[list]) -> bytes:
     buffer = io.StringIO()
     writer = csv.writer(buffer, quoting=csv.QUOTE_MINIMAL, lineterminator="\r\n")
@@ -463,7 +442,7 @@ def csv_chunk(header: list[str], rows: list[list]) -> bytes:
 async def export_balance_csv(
     session: AsyncSession, filters: BalanceFilters, leave_year_id: int | None
 ):
-    """Yield UTF-8 CSV chunks, starting with the BOM so Excel shows Bengali."""
+    """Stream UTF-8 CSV chunks with BOM prefix."""
     yield b"\xef\xbb\xbf" + csv_chunk(BALANCE_HEADER, [])
     async for batch in iter_balance_batches(session, filters, leave_year_id):
         yield csv_chunk([], [balance_csv_row(row) for row in batch])

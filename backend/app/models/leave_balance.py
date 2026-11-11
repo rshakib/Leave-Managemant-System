@@ -13,14 +13,10 @@ from sqlmodel import Field, SQLModel
 
 from app.models.base import BaseModel
 
-# Shared column definition for the four balance numbers and allocations:
-# exact decimal(5,2) that can never be negative.
 _DAYS_COLUMN = dict(nullable=False, server_default=text("0"))
 
 
 class EmployeeLeaveType(BaseModel, SQLModel, table=True):
-    """Which leave types an employee is entitled to, per leave year (FR-LT-2)."""
-
     __tablename__ = "employee_leave_type"
     __table_args__ = (
         UniqueConstraint(
@@ -47,8 +43,6 @@ class EmployeeLeaveType(BaseModel, SQLModel, table=True):
 
 
 class LeaveAssignmentTransfer(BaseModel, SQLModel, table=True):
-    """Tracks used days transferred to Annual Leave when a leave assignment is removed."""
-
     __tablename__ = "leave_assignment_transfer"
     __table_args__ = (
         UniqueConstraint(
@@ -78,13 +72,6 @@ class LeaveAssignmentTransfer(BaseModel, SQLModel, table=True):
 
 
 class LeaveBalance(BaseModel, SQLModel, table=True):
-    """The four stored numbers per (employee, leave type, leave year) — FR-LT-3.
-
-    `available` is deliberately NOT stored: it is computed as
-    `allocated + carried_forward - used - pending` (DECISIONS D-02 fixes the
-    name `carried_forward`, not `carried_in`).
-    """
-
     __tablename__ = "leave_balance"
     __table_args__ = (
         UniqueConstraint(
@@ -97,7 +84,6 @@ class LeaveBalance(BaseModel, SQLModel, table=True):
         CheckConstraint("carried_forward >= 0", name="ck_leave_balance_carried"),
         CheckConstraint("used >= 0", name="ck_leave_balance_used"),
         CheckConstraint("pending >= 0", name="ck_leave_balance_pending"),
-        # A negative available balance is never allowed (DECISIONS D-24/D-09).
         CheckConstraint(
             "allocated + carried_forward - used - pending >= 0",
             name="ck_leave_balance_available_not_negative",
@@ -130,22 +116,18 @@ class LeaveBalance(BaseModel, SQLModel, table=True):
         return self.allocated + self.carried_forward - self.used - self.pending
 
 
-# --- Pydantic-only models (never a database table) -------------------------
-
 _DAYS_FIELD = dict(ge=0, max_digits=5, decimal_places=2)
 
 
 class LeaveAssignmentCreate(SQLModel):
     employee_id: int
     leave_type_id: int
-    # Both are optional: default to the active leave year and the leave type's quota.
     leave_year_id: int | None = None
     allocated_days: Decimal | None = Field(default=None, **_DAYS_FIELD)
 
 
 class BulkAssignmentRequest(SQLModel):
     leave_type_ids: list[int] = Field(min_length=1)
-    # Exactly ONE of these three scopes must be given.
     division_id: int | None = None
     department_id: int | None = None
     employee_ids: list[int] | None = None
@@ -180,8 +162,6 @@ class BulkAssignmentResult(SQLModel):
 
 
 class LeaveBalanceRead(SQLModel):
-    """Response shape: the four stored numbers plus the computed `available`."""
-
     id: int
     employee_id: int
     employee_name: str

@@ -3,10 +3,6 @@
 Revision ID: 7e3d308d483e
 Revises: 116e7a2af170
 Create Date: 2026-10-26 02:10:06.734159
-
-The manual-adjustment ledger (NFR-1). Like `audit_log` it is APPEND-ONLY: a
-trigger refuses UPDATE, DELETE and TRUNCATE, so a wrong adjustment is repaired by
-writing the opposite adjustment, never by editing history (DECISIONS D-155).
 """
 from typing import Sequence, Union
 
@@ -53,10 +49,8 @@ def upgrade() -> None:
     op.create_index('ix_adjustment_balance', 'leave_balance_adjustment', ['balance_id', sa.literal_column('created_at DESC')], unique=False)
     op.create_index('ix_adjustment_employee', 'leave_balance_adjustment', ['employee_id', sa.literal_column('created_at DESC')], unique=False)
 
-    # Supabase: block the public Data API from this table.
     op.execute("ALTER TABLE leave_balance_adjustment ENABLE ROW LEVEL SECURITY")
 
-    # --- append-only guarantee ------------------------------------------
     op.execute(
         """
         CREATE FUNCTION adjustment_block_changes() RETURNS trigger AS $$

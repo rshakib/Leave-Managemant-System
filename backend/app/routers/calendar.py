@@ -22,11 +22,6 @@ async def preview_calendar(
     current: Employee = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> CalendarPreview:
-    """Chargeable days plus the per-day breakdown for a date range.
-
-    `employee_id` defaults to the signed-in user. Only an ADMIN may look at
-    somebody else's calendar.
-    """
     if employee_id is not None and employee_id != current.id:
         if Role.ADMIN not in await load_roles(session, current.id):
             raise HTTPException(

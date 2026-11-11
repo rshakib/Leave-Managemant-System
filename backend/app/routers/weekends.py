@@ -55,7 +55,6 @@ async def put_global_weekend(
     session: AsyncSession = Depends(get_session),
     actor: Employee = Depends(get_current_user),
 ) -> WeekendSettingRead:
-    """Create or update the single global weekend row."""
     row = await _global_row(session)
     before = sorted(row.days_of_week) if row is not None else None
     if row is None:
@@ -123,7 +122,6 @@ async def put_employee_weekend(
     session: AsyncSession = Depends(get_session),
     actor: Employee = Depends(get_current_user),
 ) -> WeekendSettingRead:
-    """Create or update an employee's weekend override."""
     employee = await session.get(Employee, employee_id)
     if employee is None:
         raise HTTPException(
@@ -171,7 +169,6 @@ async def delete_employee_weekend(
     session: AsyncSession = Depends(get_session),
     actor: Employee = Depends(get_current_user),
 ) -> Response:
-    """Remove an override so the global weekend applies again."""
     employee = await session.get(Employee, employee_id)
     if employee is None:
         raise HTTPException(

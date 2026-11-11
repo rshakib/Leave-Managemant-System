@@ -3,13 +3,6 @@
 Revision ID: 8e050ee9b800
 Revises: 83a61549e9e3
 Create Date: 2026-10-25 15:34:53.014401
-
-Creates the `leave_year` and `leave_type` tables (FR-LT-1) and enables Row Level
-Security on both, as in Phases 2-3.
-
-`leave_year` gets a PARTIAL UNIQUE INDEX on `is_active` so at most one year can
-be active at a time (DECISIONS D-14 / D-52), plus a CHECK that
-`end_date >= start_date`.
 """
 from typing import Sequence, Union
 

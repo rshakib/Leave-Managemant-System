@@ -28,14 +28,6 @@ class EmailStatus(str, Enum):
 
 
 class EmailOutbox(BaseModel, SQLModel, table=True):
-    """One queued email (the transactional outbox, DECISIONS D-19).
-
-    A row is written in the SAME transaction as the leave action, so there is no
-    "saved the leave but forgot the email" gap. `payload` holds the FACTS (names,
-    dates, days, balances) frozen at that moment — not the finished email, so the
-    template can change later without rewriting history.
-    """
-
     __tablename__ = "email_outbox"
     __table_args__ = (
         CheckConstraint(
@@ -86,8 +78,6 @@ class EmailOutbox(BaseModel, SQLModel, table=True):
 
 
 class EmailAttempt(BaseModel, SQLModel, table=True):
-    """The audit trail of FR-NOT-2: one row per delivery attempt."""
-
     __tablename__ = "email_attempt"
 
     id: int | None = Field(default=None, primary_key=True, sa_type=BigInteger)
@@ -102,9 +92,6 @@ class EmailAttempt(BaseModel, SQLModel, table=True):
     success: bool = Field(sa_column=Column(Boolean, nullable=False))
     error: str | None = Field(default=None, max_length=500)
     backend: str = Field(sa_column=Column(String(30), nullable=False))
-
-
-# --- Pydantic-only models (never a database table) -------------------------
 
 
 class EmailAttemptRead(SQLModel):
@@ -135,17 +122,12 @@ class EmailOutboxRead(SQLModel):
 class EmailOutboxDetail(EmailOutboxRead):
     payload: dict = Field(default_factory=dict)
     attempt_history: list[EmailAttemptRead] = Field(default_factory=list)
-    # The EXACT message this row would produce, rendered now from its stored
-    # facts, so an administrator can inspect it without an SMTP server (D-195).
-    # None only when the row cannot be rendered at all.
     subject: str | None = None
     body_text: str | None = None
     body_html: str | None = None
 
 
 class QueueRunResult(SQLModel):
-    """What one manual pass of the outbox worker did."""
-
     processed: int = 0
     sent: int = 0
     failed: int = 0

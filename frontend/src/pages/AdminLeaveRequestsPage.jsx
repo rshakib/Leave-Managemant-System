@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Col, Form, Row, Spinner, Table } from 'react-bootstrap'
 import { useNavigate } from 'react-router-dom'
 
 import api, { errorMessage } from '../api/client'
-import DateFilter from '../components/DateFilter'
+import DateFilter, { getLastMonthRange } from '../components/DateFilter'
+import Icon from '../components/Icon.jsx'
 import RequestStatusBadge from '../components/RequestStatusBadge'
 import { useAutoRefresh } from '../hooks/useAutoRefresh.js'
 
@@ -17,6 +18,7 @@ function days(value) {
 
 export default function AdminLeaveRequestsPage() {
   const navigate = useNavigate()
+  const defaultDates = useMemo(() => getLastMonthRange(), [])
   const [requests, setRequests] = useState([])
   const [employees, setEmployees] = useState([])
   const [loading, setLoading] = useState(true)
@@ -24,9 +26,10 @@ export default function AdminLeaveRequestsPage() {
 
   const [status, setStatus] = useState('')
   const [employeeId, setEmployeeId] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [dateFrom, setDateFrom] = useState(defaultDates.from)
+  const [dateTo, setDateTo] = useState(defaultDates.to)
   const [offset, setOffset] = useState(0)
+  const [exporting, setExporting] = useState(false)
 
   const loadEmployees = useCallback(async () => {
     try {
@@ -64,12 +67,80 @@ export default function AdminLeaveRequestsPage() {
 
   // Live view: reload after any change, when the tab returns, or on the poll.
   useAutoRefresh(() => {
-      loadRequests()
-    })
+    loadRequests()
+  })
+
+  const downloadCsv = useCallback(async () => {
+    setExporting(true)
+    setError('')
+    try {
+      const params = {
+        include_reason: true,
+      }
+      if (status) params.status = status
+      if (employeeId) params.employee_id = employeeId
+      if (dateFrom) params.date_from = dateFrom
+      if (dateTo) params.date_to = dateTo
+
+      const response = await api.get('/reports/history/export', {
+        params,
+        responseType: 'blob',
+      })
+      const disposition = response.headers['content-disposition'] ?? ''
+      const match = /filename="?([^";]+)"?/.exec(disposition)
+      const filename = match ? match[1] : 'all-leave-requests.csv'
+      const url = window.URL.createObjectURL(response.data)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      let message = 'Could not export requests to CSV.'
+      const blob = err.response?.data
+      if (blob instanceof Blob) {
+        try {
+          const parsed = JSON.parse(await blob.text())
+          if (parsed?.detail) message = parsed.detail
+        } catch {
+          message = 'Could not export requests to CSV.'
+        }
+      } else {
+        message = errorMessage(err, 'Could not export requests to CSV.')
+      }
+      setError(message)
+    } finally {
+      setExporting(false)
+    }
+  }, [status, employeeId, dateFrom, dateTo])
 
   return (
     <>
-      <h1 className="h3 mb-3">All leave requests</h1>
+      <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div>
+          <h1 className="h3 mb-0">All leave requests</h1>
+          <div className="text-muted small mt-1">
+            Browse, filter, and inspect leave requests across all staff.
+          </div>
+        </div>
+        <Button
+          variant="outline-primary"
+          size="sm"
+          className="d-flex align-items-center gap-2 shadow-xs"
+          disabled={exporting}
+          onClick={downloadCsv}
+          title="Download filtered leave requests as a CSV spreadsheet"
+        >
+          {exporting ? (
+            <Spinner animation="border" size="sm" />
+          ) : (
+            <Icon name="download" size={16} />
+          )}
+          <span>{exporting ? 'Exporting…' : 'Download CSV'}</span>
+        </Button>
+      </div>
 
       {error && (
         <Alert variant="danger" dismissible onClose={() => setError('')}>
@@ -125,6 +196,23 @@ export default function AdminLeaveRequestsPage() {
             setOffset(0)
           }}
         />
+        {(!dateFrom || !dateTo || dateFrom !== defaultDates.from || dateTo !== defaultDates.to) && (
+          <Col md="auto" sm={6} xs={12}>
+            <Button
+              variant="link"
+              size="sm"
+              className="p-0 text-decoration-none small text-muted pb-1"
+              onClick={() => {
+                setDateFrom(defaultDates.from)
+                setDateTo(defaultDates.to)
+                setOffset(0)
+              }}
+              title="Reset date filter to default last 1 month"
+            >
+              Reset to last 1 month
+            </Button>
+          </Col>
+        )}
       </Row>
 
       {loading ? (

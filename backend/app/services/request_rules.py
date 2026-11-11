@@ -1,8 +1,4 @@
-"""Pure rules about leave requests: overlap detection and cross-year splitting.
-
-No database, no HTTP, no clock — so both the preview and the real submission can
-call the exact same code and can never disagree.
-"""
+"""Pure leave request overlap and cross-year allocation splitting rules."""
 
 from dataclasses import dataclass
 from datetime import date
@@ -14,13 +10,11 @@ HALF_DAYS = (DayType.FIRST_HALF, DayType.SECOND_HALF)
 
 
 class RequestRuleError(ValueError):
-    """Raised when a rule about ranges/splitting cannot be satisfied."""
+    pass
 
 
 @dataclass(frozen=True)
 class RequestRange:
-    """The minimum needed to decide whether two requests overlap."""
-
     start_date: date
     end_date: date
     day_type: DayType | str = DayType.FULL_DAY
@@ -38,13 +32,7 @@ def _year_for(value: date, years):
 
 
 def ranges_conflict(a: RequestRange, b: RequestRange) -> bool:
-    """True when two requests want the same calendar days (D-09).
-
-    Inclusive ranges overlap when `a.start <= b.end and b.start <= a.end`.
-    The one exception: two HALF-day requests on the SAME single date in
-    DIFFERENT halves (first half + second half) fit together. Everything else
-    conflicts — including the same half twice, and a full day against any half.
-    """
+    """Return True if two leave requests overlap on any working interval."""
     if a.start_date > b.end_date or b.start_date > a.end_date:
         return False
 
@@ -62,10 +50,6 @@ def ranges_conflict(a: RequestRange, b: RequestRange) -> bool:
 
 
 def years_for_days(days: list[DayResult], leave_years) -> list:
-    """Every leave year the range touches, in date order.
-
-    Raises `RequestRuleError` naming the first date that sits outside all years.
-    """
     years = sorted(leave_years, key=lambda year: year.start_date)
     found: dict[int, object] = {}
     for day in days:
@@ -81,19 +65,10 @@ def split_days_by_leave_year(
     leave_years,
     day_type: DayType | str = DayType.FULL_DAY,
 ) -> dict[int, Decimal]:
-    """Split the per-day list across leave years (D-05).
-
-    `leave_years` are objects with `id`, `start_date` and `end_date`.
-    `day_type` is needed because a half day's single WORKING day is worth 0.5,
-    not 1.0 — the per-day list alone cannot tell those apart.
-
-    Every date in the range must sit inside some leave year. Years with zero
-    chargeable days are omitted (an allocation row must be > 0 days).
-    """
+    """Aggregate chargeable working days per leave year."""
     resolved_type = _day_type(day_type)
     weight = Decimal("0.5") if resolved_type in HALF_DAYS else Decimal("1")
 
-    # Validates coverage too: raises if a date is outside every leave year.
     years_for_days(days, leave_years)
     years = sorted(leave_years, key=lambda year: year.start_date)
 
@@ -108,5 +83,4 @@ def split_days_by_leave_year(
 
 
 def split_total(per_year: dict[int, Decimal]) -> Decimal:
-    """The sum of the parts — must equal the request's chargeable days."""
     return sum(per_year.values(), Decimal("0"))

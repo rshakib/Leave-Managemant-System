@@ -1,8 +1,4 @@
-"""Attachment storage behind a tiny interface (DECISIONS D-11).
-
-`save` / `open_path` / `delete` are all the router needs, so the local-disk
-implementation can later be swapped for S3 without touching callers.
-"""
+"""Local filesystem attachment storage helpers."""
 
 import datetime
 import os
@@ -13,7 +9,6 @@ from fastapi import HTTPException, UploadFile, status
 
 from app.core.config import settings
 
-# Extension -> the "magic bytes" (file signature) the real content must start with.
 ALLOWED_SIGNATURES: dict[str, bytes] = {
     "pdf": b"%PDF-",
     "png": b"\x89PNG\r\n\x1a\n",
@@ -39,12 +34,7 @@ def _too_large() -> HTTPException:
 
 
 async def save(upload: UploadFile) -> str:
-    """Store the upload and return its path RELATIVE to the media directory.
-
-    The uploaded filename is only used to read the extension — it never becomes
-    part of a path (that is how path-traversal bugs happen). The stored name is
-    a random UUID.
-    """
+    """Validate and save an upload, returning its path relative to the media root."""
     suffix = Path(upload.filename or "").suffix.lower().lstrip(".")
     if suffix not in ALLOWED_SIGNATURES:
         raise HTTPException(
@@ -52,7 +42,6 @@ async def save(upload: UploadFile) -> str:
             "Only PDF, PNG, JPG or JPEG files are allowed.",
         )
 
-    # Read in chunks and stop as soon as the limit is passed.
     data = bytearray()
     while True:
         chunk = await upload.read(CHUNK_BYTES)
@@ -79,11 +68,9 @@ async def save(upload: UploadFile) -> str:
 
 
 def resolve(relative: str) -> Path:
-    """Turn a stored relative path into an absolute one, refusing escapes."""
     root = _media_root().resolve()
     candidate = (root / relative).resolve()
     if candidate != root and not str(candidate).startswith(str(root) + os.sep):
-        # `../..` or an absolute-looking path: never serve outside the media dir.
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Attachment not found.")
     return candidate
 
@@ -96,7 +83,6 @@ def open_path(relative: str) -> Path:
 
 
 def delete(relative: str) -> None:
-    """Best-effort delete (used when the database write fails after saving)."""
     try:
         resolve(relative).unlink(missing_ok=True)
     except HTTPException:

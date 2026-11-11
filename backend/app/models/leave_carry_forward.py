@@ -10,12 +10,6 @@ _DAYS = dict(nullable=False, server_default=text("0"))
 
 
 class LeaveCarryForward(BaseModel, SQLModel, table=True):
-    """The year-end rollover log (FR-LT-4, DECISIONS D-22/D-25).
-
-    One row per (employee, leave type, from-year) that actually carried days
-    forward. A leave type that does not allow carry-forward writes NO row.
-    """
-
     __tablename__ = "leave_carry_forward"
     __table_args__ = (
         UniqueConstraint(
@@ -26,7 +20,6 @@ class LeaveCarryForward(BaseModel, SQLModel, table=True):
         ),
         CheckConstraint("carried_days >= 0", name="ck_leave_carry_forward_carried"),
         CheckConstraint("forfeited_days >= 0", name="ck_leave_carry_forward_forfeited"),
-        # The two halves must add up to exactly what was left at closing.
         CheckConstraint(
             "remaining_at_close = carried_days + forfeited_days",
             name="ck_leave_carry_forward_split",
@@ -57,9 +50,6 @@ class LeaveCarryForward(BaseModel, SQLModel, table=True):
     processed_by: int | None = Field(
         default=None, foreign_key="employee.id", sa_type=BigInteger, nullable=True
     )
-
-
-# --- Pydantic-only models --------------------------------------------------
 
 
 class CarryForwardRead(SQLModel):

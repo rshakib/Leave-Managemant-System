@@ -1,16 +1,10 @@
-"""Pure security rules: tokens, refresh rotation, rate limits, password policy.
-
-No database, no network, no clock: every function takes `now` (or nothing) so it
-can be unit-tested directly.
-"""
+"""Pure security rules for refresh tokens, login throttling, client IP, and passwords."""
 
 import datetime
 import hashlib
 import hmac
 import secrets
 from dataclasses import dataclass
-
-# --- refresh-token outcomes -------------------------------------------------
 
 VALID = "VALID"
 EXPIRED = "EXPIRED"
@@ -21,23 +15,15 @@ REUSED_THEFT = "REUSED_THEFT"
 
 
 def hash_token(token: str) -> str:
-    """SHA-256 hex of an opaque token — the DB never stores the token itself."""
     return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
 
 
 def new_token() -> str:
-    """A fresh opaque refresh token (48 random bytes, urlsafe)."""
     return secrets.token_urlsafe(48)
 
 
 def classify_refresh(row, now, grace_seconds: int, max_family_age_days: int) -> str:
-    """Decide what a presented refresh token means.
-
-    `row` carries expires_at, revoked_at, replaced_at and family_started_at.
-    A token that was ROTATED (replaced_at set) has been used before: within the
-    grace window that is the benign "two tabs refreshed at once" race; after it,
-    somebody is replaying a stolen token.
-    """
+    """Classify a refresh token as valid, expired, revoked, within grace, or reused."""
     replaced_at = getattr(row, "replaced_at", None)
     if replaced_at is not None:
         age = (now - replaced_at).total_seconds()
@@ -54,9 +40,6 @@ def classify_refresh(row, now, grace_seconds: int, max_family_age_days: int) -> 
         return FAMILY_TOO_OLD
 
     return VALID
-
-
-# --- login rate limiting ----------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -79,10 +62,6 @@ class LoginDecision:
 
 
 def _retry_after(failures, limit: int, window_seconds: int, now) -> int:
-    """0 when this key is under its limit, otherwise seconds until it clears.
-
-    A block lasts until the OLDEST counted failure drops out of the window.
-    """
     cutoff = now - datetime.timedelta(seconds=window_seconds)
     counted = sorted(moment for moment in failures if moment > cutoff)
     if len(counted) < limit:
@@ -99,7 +78,6 @@ def decide_login(
     email_failures,
     limits: LoginLimits = DEFAULT_LIMITS,
 ) -> LoginDecision:
-    """Is this login allowed, given the failures since each key's last success?"""
     waits = [
         _retry_after(pair_failures, limits.pair_failures, limits.pair_window_seconds, now),
         _retry_after(ip_failures, limits.ip_failures, limits.ip_window_seconds, now),
@@ -111,17 +89,8 @@ def decide_login(
     return LoginDecision(allowed=False, retry_after_seconds=longest)
 
 
-# --- client IP and hashing --------------------------------------------------
-
-
 def client_ip(peer_host, forwarded_for_header, trusted_proxy_count: int) -> str:
-    """The caller's address, with X-Forwarded-For handled carefully.
-
-    * 0 trusted proxies: the header is IGNORED (any client can send it), so the
-      peer address is the truth;
-    * n > 0: take the n-th address counted from the RIGHT — the last entries are
-      the ones written by our own proxies, so they cannot be forged by the client.
-    """
+    """Extract client IP using peer host or the rightmost trusted X-Forwarded-For hop."""
     peer = (peer_host or "").strip()
     if not trusted_proxy_count or trusted_proxy_count < 1:
         return peer
@@ -137,18 +106,14 @@ def client_ip(peer_host, forwarded_for_header, trusted_proxy_count: int) -> str:
 
 
 def hash_ip(ip: str, key: str) -> str:
-    """HMAC-SHA256 hex, so a raw IP address is never stored."""
     return hmac.new(
         (key or "").encode("utf-8"), (ip or "").encode("utf-8"), hashlib.sha256
     ).hexdigest()
 
 
-# --- password policy --------------------------------------------------------
-
 MIN_PASSWORD_LENGTH = 10
 MAX_PASSWORD_LENGTH = 128
 
-# The 50 most common passwords (lower-case); checked case-insensitively.
 COMMON_PASSWORDS = frozenset(
     {
         "123456", "password", "12345678", "qwerty", "123456789", "12345",
@@ -165,11 +130,7 @@ COMMON_PASSWORDS = frozenset(
 
 
 def check_password_policy(password: str, email: str | None = None) -> list[str]:
-    """Readable problems with a NEW password (an empty list means it is fine).
-
-    Existing short passwords keep working at login — this only guards passwords
-    being SET (registration, admin creation/reset, change-password).
-    """
+    """Validate a new password against policy rules and return any error messages."""
     text = password or ""
     problems: list[str] = []
 
@@ -196,8 +157,6 @@ def check_password_policy(password: str, email: str | None = None) -> list[str]:
 
     return problems
 
-
-# --- production configuration guard ----------------------------------------
 
 PLACEHOLDER_SECRETS = frozenset(
     {
@@ -228,7 +187,7 @@ def _cors_origins(settings) -> list[str]:
 
 
 def validate_production_settings(settings) -> list[str]:
-    """Problems that must stop a production start. Empty outside production."""
+    """Return configuration errors when running in production mode."""
     if str(_setting(settings, "app_env", "development")).lower() != "production":
         return []
 
@@ -266,9 +225,6 @@ def validate_production_settings(settings) -> list[str]:
             "EMAIL_BACKEND must be a real backend (smtp) in production."
         )
 
-    # Caddy is the ONE proxy in front of the API. 0 would make every client look
-    # like Caddy (one shared rate-limit bucket); more than 1 would trust an entry
-    # a client could have written itself.
     if int(_setting(settings, "trusted_proxy_count", 0) or 0) != 1:
         problems.append(
             "TRUSTED_PROXY_COUNT must be exactly 1 in production (Caddy is the only "

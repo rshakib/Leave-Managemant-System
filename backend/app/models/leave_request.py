@@ -38,12 +38,6 @@ class ApprovalStatus(str, Enum):
 
 
 class LeaveRequest(BaseModel, SQLModel, table=True):
-    """One leave request (FR-LR-1).
-
-    `leave_year_id` is the year of `start_date`; the per-year split lives in
-    `leave_request_allocation` (DECISIONS D-05).
-    """
-
     __tablename__ = "leave_request"
     __table_args__ = (
         CheckConstraint("start_date <= end_date", name="ck_leave_request_dates"),
@@ -67,7 +61,6 @@ class LeaveRequest(BaseModel, SQLModel, table=True):
             "start_date",
             "end_date",
         ),
-        # Cancelling records who/when/why; the two must be set together.
         CheckConstraint(
             "(cancelled_at IS NULL AND cancelled_by_id IS NULL) OR "
             "(cancelled_at IS NOT NULL AND cancelled_by_id IS NOT NULL)",
@@ -116,8 +109,6 @@ class LeaveRequest(BaseModel, SQLModel, table=True):
 
 
 class LeaveRequestAllocation(BaseModel, SQLModel, table=True):
-    """How many days a request takes from each leave year (DECISIONS D-05)."""
-
     __tablename__ = "leave_request_allocation"
     __table_args__ = (
         UniqueConstraint(
@@ -137,8 +128,6 @@ class LeaveRequestAllocation(BaseModel, SQLModel, table=True):
 
 
 class LeaveRequestApproval(BaseModel, SQLModel, table=True):
-    """One row per approver, captured at submission time (FR-LR-3)."""
-
     __tablename__ = "leave_request_approval"
     __table_args__ = (
         UniqueConstraint(
@@ -148,7 +137,6 @@ class LeaveRequestApproval(BaseModel, SQLModel, table=True):
             "status IN ('PENDING', 'APPROVED', 'REJECTED', 'SKIPPED')",
             name="ck_leave_request_approval_status",
         ),
-        # For the Phase-11 approver inbox.
         Index(
             "ix_leave_request_approval_approver_status", "approver_id", "status"
         ),
@@ -168,9 +156,6 @@ class LeaveRequestApproval(BaseModel, SQLModel, table=True):
     acted_at: datetime.datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
-
-
-# --- Pydantic-only models (never a database table) -------------------------
 
 
 class AllocationRead(SQLModel):
@@ -217,7 +202,6 @@ class LeaveRequestDetail(LeaveRequestSummary):
     cancel_reason: str | None = None
     allocations: list[AllocationRead] = Field(default_factory=list)
     approvals: list[ApprovalRead] = Field(default_factory=list)
-    # A closed leave year can never be changed again, so the screen warns first.
     touches_closed_year: bool = False
     closed_year_names: list[str] = Field(default_factory=list)
     can_curtail: bool = False
@@ -225,8 +209,6 @@ class LeaveRequestDetail(LeaveRequestSummary):
 
 
 class CheckProblem(SQLModel):
-    """One reason the request cannot be submitted."""
-
     code: str
     message: str
     status: int
@@ -247,8 +229,6 @@ class YearBalanceRead(SQLModel):
 
 
 class LeaveRequestCheck(SQLModel):
-    """What `/leave-requests/check` returns — the same day list as /calendar/preview."""
-
     employee_id: int
     leave_type_id: int
     start_date: datetime.date
@@ -264,8 +244,6 @@ class LeaveRequestCheck(SQLModel):
 
 
 class InboxItem(SQLModel):
-    """One row in an approver's inbox."""
-
     approval_id: int
     approval_status: ApprovalStatus
     request_id: int
@@ -287,6 +265,8 @@ class InboxItem(SQLModel):
 
 class InboxCount(SQLModel):
     pending: int
+    early_returns: int = 0
+    total: int = 0
 
 
 class DecisionResult(SQLModel):
@@ -295,8 +275,6 @@ class DecisionResult(SQLModel):
 
 
 class AdminRequestRow(LeaveRequestSummary):
-    """One row in the admin "all requests" table."""
-
     employee_id: int
     employee_code: str
     employee_name: str

@@ -14,22 +14,6 @@ from app.models.base import BaseModel
 
 
 class WeekendSetting(BaseModel, SQLModel, table=True):
-    """Weekend days — one global row plus optional per-employee overrides.
-
-    `days_of_week` uses the requirements' numbering: Sunday=0 ... Saturday=6.
-    A NULL `employee_id` means "the global default".
-
-    UNIQUE + NULL trap (DECISIONS D-08): a normal `UNIQUE(employee_id)` would
-    allow MANY rows with NULL, because in SQL two NULLs are never "equal". So
-    instead of one unique constraint we use TWO partial unique indexes:
-
-    - one that only covers non-NULL employees (max one override per employee);
-    - one that only covers the NULL row and indexes a constant expression, so
-      at most ONE global row can exist.
-
-    `effective_from` is deliberately not modelled (DECISIONS D-29).
-    """
-
     __tablename__ = "weekend_setting"
     __table_args__ = (
         CheckConstraint(
@@ -60,11 +44,7 @@ class WeekendSetting(BaseModel, SQLModel, table=True):
     days_of_week: list[int] = Field(sa_column=Column(ARRAY(Integer), nullable=False))
 
 
-# --- Pydantic-only models (never a database table) -------------------------
-
-
 def _clean_days(values: list[int]) -> list[int]:
-    """De-duplicate and sort weekend days (the DB CHECK handles the rest)."""
     cleaned = sorted({int(value) for value in values})
     if not cleaned:
         raise ValueError("Pick at least one weekend day.")

@@ -1,16 +1,4 @@
-"""Row locks on leave years — the gate every balance writer must pass.
-
-Why a leave year is the gate: a year is closed exactly once, and after that no
-balance in it may change. If every writer takes a SHARED lock on the leave-year
-row(s) it is about to touch, and the closing takes an EXCLUSIVE lock on the same
-row, then either the writer wins (and the closing waits, then sees the new data)
-or the closing wins (and the writer waits, then sees `is_closed = true` and
-refuses). Both outcomes are consistent.
-
-Lock ordering rule (so two transactions can never wait for each other):
-    leave year ids are ALWAYS locked in ascending id order,
-    and a closing never locks an employee row.
-"""
+"""Leave-year row locking helpers."""
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -26,7 +14,6 @@ def _ids(year_ids) -> list[int]:
 async def lock_years_shared(
     session: AsyncSession, year_ids
 ) -> list[LeaveYear]:
-    """FOR SHARE on the given leave years (ascending id). Several writers may hold this."""
     ids = _ids(year_ids)
     if not ids:
         return []
@@ -44,7 +31,6 @@ async def lock_years_shared(
 async def lock_years_exclusive(
     session: AsyncSession, year_ids
 ) -> list[LeaveYear]:
-    """FOR UPDATE on the given leave years (ascending id). Only one closer at a time."""
     ids = _ids(year_ids)
     if not ids:
         return []
@@ -60,7 +46,6 @@ async def lock_years_exclusive(
 
 
 def assert_years_open(years) -> None:
-    """Call this AFTER taking the lock — the year may have been closed while we waited."""
     for year in years:
         if year.is_closed:
             raise HTTPException(

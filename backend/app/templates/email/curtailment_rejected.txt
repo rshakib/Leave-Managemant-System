@@ -1,0 +1,16 @@
+Hello {{ employee_name }},
+
+Your early return request has been rejected by {{ actor_name }}.
+
+  Leave type       : {{ leave_type_name }} ({{ leave_type_code }})
+  Requested end    : {{ curtailed_end_date }}
+{% if decision_note %}
+  Reason/Note      : {{ decision_note }}
+{% endif %}
+
+Your original leave dates remain unchanged.
+You can view your leave request here:
+{{ link }}
+
+-- Leave Management System
+

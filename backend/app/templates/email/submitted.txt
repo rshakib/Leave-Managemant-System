@@ -9,7 +9,14 @@ Hello,
   Approvers  : {{ approver_count }}
   Reason     : {{ reason_short }}
 
-Open it here: {{ link }}
+To quickly approve without signing in:
+{{ quick_approve_link }}
+
+To reject:
+{{ quick_reject_link }}
+
+Or open inside the application:
+{{ app_link }}
 
 You are receiving this because you are an approver for {{ employee_name }}.
 -- Leave Management System

@@ -1,17 +1,4 @@
-"""Data retention (Phase 16D-1).
-
-Prunes ONLY three things, in batches, so no long lock is ever taken:
-
-* `login_attempt`                 — telemetry older than RETENTION_LOGIN_ATTEMPT_DAYS
-* `refresh_token`                 — tokens that are unusable AND older than the cutoff
-* `email_outbox` (+ its `email_attempt` rows) — ONLY emails that were SENT and are old
-
-The audit log, the adjustment ledger, the carry-forward log and every business
-table are NEVER pruned (see maintenance_rules.py).
-
-A cleanup is a SYSTEM action with no human actor, so it writes no audit row —
-consistent with D-148. It logs counts only (no personal data).
-"""
+"""Scheduled data retention cleanup service."""
 
 import datetime
 
@@ -22,7 +9,6 @@ from app.core.config import settings
 from app.db.session import async_session_factory
 from app.services.maintenance_rules import retention_cutoffs
 
-# A fixed key so every worker process agrees on the same advisory lock.
 CLEANUP_LOCK_KEY = 4_242_016_001
 
 
@@ -35,7 +21,6 @@ async def _count(session: AsyncSession, sql: str, params: dict) -> int:
 
 
 async def _prune(session: AsyncSession, delete_sql: str, params: dict) -> int:
-    """Delete in batches of N, committing after each batch."""
     total = 0
     while True:
         result = await session.execute(text(delete_sql), params)
@@ -69,9 +54,7 @@ TOKEN_DELETE = """
 
 OUTBOX_FILTER = "status = 'SENT' AND sent_at IS NOT NULL AND sent_at < :cutoff"
 OUTBOX_COUNT = f"SELECT count(*) FROM email_outbox WHERE {OUTBOX_FILTER}"
-# The attempts must go first: they point at the outbox row (FK). Both statements
-# run inside the same transaction, so the child always disappears before its
-# parent and no foreign key is ever violated.
+# Delete child attempt rows before parent outbox rows to satisfy FK constraints.
 ATTEMPT_DELETE = f"""
     DELETE FROM email_attempt WHERE outbox_id IN (
         SELECT id FROM email_outbox WHERE {OUTBOX_FILTER} LIMIT :limit
@@ -85,7 +68,6 @@ OUTBOX_DELETE = f"""
 
 
 async def cleanup(dry_run: bool = True, now: datetime.datetime | None = None) -> dict:
-    """Return {table: count}. Dry run counts, apply mode really deletes."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cutoffs = retention_cutoffs(now, settings)
     limit = _batch_size()
@@ -130,7 +112,6 @@ async def cleanup(dry_run: bool = True, now: datetime.datetime | None = None) ->
 
 
 async def try_cleanup_lock() -> bool:
-    """True when THIS process got the daily cleanup lock (advisory lock)."""
     async with async_session_factory() as session:
         got = bool(
             await session.scalar(

@@ -1,8 +1,4 @@
-"""Pure helpers for the audit trail (NFR-1, DECISIONS D-23).
-
-No database, no clock: everything here turns ordinary Python values into
-something JSONB-safe, hides secrets, and validates an entry before it is stored.
-"""
+"""Pure serialization, redaction, and validation helpers for audit logs."""
 
 import datetime
 import json
@@ -30,10 +26,8 @@ ENTITY_TYPES = frozenset(
     }
 )
 
-# ACTIONS are SCREAMING_SNAKE_CASE, e.g. SUBMIT, PASSWORD_RESET, REPORT_EXPORT.
 ACTION_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{2,40}$")
 
-# A key is sensitive when its lower-cased name CONTAINS one of these.
 SENSITIVE_KEY_PARTS = (
     "password",
     "passwd",
@@ -50,18 +44,17 @@ MAX_BYTES = 20000
 
 
 class AuditValueError(ValueError):
-    """Raised when a value cannot be audited (never silently dropped)."""
+    pass
 
 
 def _decimal_text(value: Decimal) -> str:
     text = str(value)
-    if "E" in text or "e" in text:  # never store "1E+3"
+    if "E" in text or "e" in text:
         text = format(value, "f")
     return text
 
 
 def to_jsonable(value):
-    """Convert a value into something JSONB can store, or raise."""
     if value is None or isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, float):
@@ -103,12 +96,10 @@ def _redact(value):
 
 
 def redact(data):
-    """Return a copy with secret VALUES replaced (the keys stay). Never mutates."""
     return _redact(data)
 
 
 def changed_fields(old, new) -> list[str]:
-    """Sorted top-level keys whose value differs between `old` and `new`."""
     old = old or {}
     new = new or {}
     return sorted(
@@ -117,7 +108,6 @@ def changed_fields(old, new) -> list[str]:
 
 
 def limit_size(value, max_bytes: int = MAX_BYTES):
-    """Return a placeholder when the JSON would be bigger than `max_bytes`."""
     encoded = json.dumps(value, ensure_ascii=False).encode("utf-8")
     if len(encoded) <= max_bytes:
         return value
@@ -125,7 +115,6 @@ def limit_size(value, max_bytes: int = MAX_BYTES):
 
 
 def validate_entry(entity_type: str, action: str) -> None:
-    """Raise `AuditValueError` unless the entity type and action are allowed."""
     if entity_type not in ENTITY_TYPES:
         raise AuditValueError(
             f"Unknown audit entity_type '{entity_type}'. Allowed: "

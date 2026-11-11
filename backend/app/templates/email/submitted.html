@@ -47,13 +47,20 @@
             </tr>
           </table>
           <p style="margin:14px 0 0;font-size:12px;color:#8a8a8a;">You are receiving this because you are an approver for {{ employee_name }}.</p>
-          <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 6px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 6px;">
             <tr>
-              <td style="background:#f79020;border-radius:6px;">
-                <a href="{{ link }}" style="display:inline-block;padding:11px 22px;font-size:14px;font-weight:bold;color:#ffffff;text-decoration:none;">Review and decide</a>
+              <td style="background:#1f9d55;border-radius:6px;">
+                <a href="{{ quick_approve_link }}" style="display:inline-block;padding:12px 24px;font-size:14px;font-weight:bold;color:#ffffff;text-decoration:none;">Approve Request</a>
+              </td>
+              <td style="width:12px;">&nbsp;</td>
+              <td style="background:#dc3545;border-radius:6px;">
+                <a href="{{ quick_reject_link }}" style="display:inline-block;padding:12px 24px;font-size:14px;font-weight:bold;color:#ffffff;text-decoration:none;">Reject</a>
               </td>
             </tr>
           </table>
+          <p style="margin:12px 0 0;font-size:12px;color:#8a8a8a;">
+            Quick actions above work without signing in. Alternatively, <a href="{{ app_link }}" style="color:#f79020;text-decoration:underline;">open inside the application</a>.
+          </p>
           <p style="margin:18px 0 0;font-size:12px;line-height:1.6;color:#a8a8a8;border-top:1px solid #f0ece4;padding-top:14px;">
             This is an automated message from the SOLshare Leave Management System — please do not reply.
           </p>

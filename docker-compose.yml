@@ -4,21 +4,89 @@ services:
     container_name: leave_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-leave_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-leave_password}
+      POSTGRES_DB: ${POSTGRES_DB:-leave_db}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-leave_user} -d ${POSTGRES_DB:-leave_db}"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  # Optional local mail inbox for learning. It only starts with:
-  #   docker compose --profile mail up -d mailpit
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: leave_backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-leave_user}:${POSTGRES_PASSWORD:-leave_password}@db:5432/${POSTGRES_DB:-leave_db}
+      - JWT_SECRET=${JWT_SECRET:-insecure-docker-secret-change-in-production-1234567890}
+      - CORS_ORIGINS=http://localhost:${FRONTEND_PORT:-5173},http://127.0.0.1:${FRONTEND_PORT:-5173},http://localhost:5175,http://127.0.0.1:5175
+      - FRONTEND_BASE_URL=http://localhost:${FRONTEND_PORT:-5173}
+      - APP_ENV=development
+      - EMAIL_BACKEND=${EMAIL_BACKEND:-console}
+      - EMAIL_FROM=${EMAIL_FROM:-leave-management@example.invalid}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
+      - SMTP_SSL=${SMTP_SSL:-false}
+      - EMBEDDED_EMAIL_WORKER=false
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - backend_media:/app/media
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: leave_worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker"]
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-leave_user}:${POSTGRES_PASSWORD:-leave_password}@db:5432/${POSTGRES_DB:-leave_db}
+      - JWT_SECRET=${JWT_SECRET:-insecure-docker-secret-change-in-production-1234567890}
+      - APP_ENV=development
+      - EMAIL_BACKEND=${EMAIL_BACKEND:-console}
+      - EMAIL_FROM=${EMAIL_FROM:-leave-management@example.invalid}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
+      - SMTP_SSL=${SMTP_SSL:-false}
+      - ORG_TIMEZONE=Asia/Dhaka
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    volumes:
+      - backend_media:/app/media
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=http://localhost:${BACKEND_PORT:-8000}
+    container_name: leave_frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      - backend
+
   mailpit:
     image: axllent/mailpit
     container_name: leave_mailpit
@@ -30,3 +98,4 @@ services:
 
 volumes:
   postgres_data:
+  backend_media:

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, Badge, Button, Card, Col, Form, Modal, Row, Spinner, Table } from 'react-bootstrap'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 
 import api, { errorMessage } from '../api/client'
 import { useAuth } from '../auth/AuthContext.jsx'
+import AccessState from '../components/AccessState.jsx'
 import CurtailmentDecisionModal from '../components/CurtailmentDecisionModal'
 import DecisionModal from '../components/DecisionModal'
 import EarlyReturnModal from '../components/EarlyReturnModal'
@@ -17,13 +18,13 @@ function days(value) {
 
 export default function LeaveRequestDetailPage() {
   const { id } = useParams()
-  const navigate = useNavigate()
   const { user } = useAuth()
   const isAdmin = user?.roles?.includes('ADMIN')
 
   const [request, setRequest] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [errorStatus, setErrorStatus] = useState(null)
   const [notice, setNotice] = useState('')
   const [downloading, setDownloading] = useState(false)
   const [decision, setDecision] = useState(null)
@@ -78,7 +79,9 @@ export default function LeaveRequestDetailPage() {
       const { data } = await api.get(`/leave-requests/${id}`)
       setRequest(data)
       setError('')
+      setErrorStatus(null)
     } catch (err) {
+      setErrorStatus(err?.response?.status ?? null)
       setError(errorMessage(err, 'Could not load this leave request.'))
     } finally {
       setLoading(false)
@@ -86,13 +89,18 @@ export default function LeaveRequestDetailPage() {
   }, [id])
 
   useEffect(() => {
+    setRequest(null)
+    setErrorStatus(null)
+    setError('')
+    setLoading(true)
     load()
   }, [load])
 
   // Live view: reload after any change, when the tab returns, or on the poll.
   useAutoRefresh(() => {
-      load()
-    })
+    if (errorStatus === 404 || errorStatus === 403) return
+    load()
+  })
 
   const decided = ({ conflict }) => {
     setDecision(null)
@@ -158,13 +166,18 @@ export default function LeaveRequestDetailPage() {
   }
 
   if (!request) {
+    if (errorStatus === 404 || errorStatus === 403 || (!errorStatus && !error)) {
+      return <AccessState variant="unavailable" />
+    }
     return (
-      <>
-        <Alert variant="danger">{error || 'Leave request not found.'}</Alert>
-        <Button variant="secondary" onClick={() => navigate(-1)}>
-          Back
-        </Button>
-      </>
+      <AccessState
+        variant="error"
+        message={error || undefined}
+        onRetry={() => {
+          setLoading(true)
+          load()
+        }}
+      />
     )
   }
 
@@ -550,9 +563,7 @@ export default function LeaveRequestDetailPage() {
                 This request is already <strong>approved</strong>. Cancelling it puts{' '}
                 <strong>{days(request.chargeable_days)} used day(s)</strong> back into
                 the employee&apos;s available balance, and the leave is removed from
-                their record. Only an administrator can do this — the employee cannot
-                cancel an approved request, and the approvers&apos; decisions stay in
-                the history.
+                their record. Approvers&apos; decisions stay in the history.
               </Alert>
             ) : (
               <Alert variant="info">

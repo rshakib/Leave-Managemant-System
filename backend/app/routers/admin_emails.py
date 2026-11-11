@@ -122,16 +122,8 @@ async def process_queue(
     reminders: bool = False,
     session: AsyncSession = Depends(get_session),
 ) -> QueueRunResult:
-    """Run ONE pass of the email worker right now.
-
-    The screen calls this so a demo never has to wait for the background worker —
-    or open a second terminal. It runs exactly the same code the worker runs
-    (`worker.drain_once()` / `worker.reminder_tick()`), and it is a system action,
-    so it writes no audit row (D-148/D-195). `?reminders=true` also runs the
-    pending-approval reminder tick, then drains what it queued.
-    """
     before = await _status_counts(session)
-    await session.commit()  # end this transaction so the counts below are fresh
+    await session.commit()
 
     await recover_stuck()
     processed = await drain_once()
@@ -157,7 +149,6 @@ async def retry_email(
     email_id: int,
     session: AsyncSession = Depends(get_session),
 ) -> EmailOutboxRead:
-    """Only a FAILED email can be retried; the old attempts stay in the log."""
     row = await session.get(EmailOutbox, email_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Email not found.")

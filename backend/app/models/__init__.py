@@ -1,12 +1,10 @@
-"""SQLModel table models.
-
-Every ``table=True`` model must be imported and re-exported here. Alembic's
-autogenerate only sees tables whose models have been imported, and
-``alembic/env.py`` imports this package for exactly that reason.
-"""
-
 from app.models.audit_log import AuditLog, AuditLogPage, AuditLogRead
-from app.models.auth_tokens import LoginAttempt, PasswordResetToken, RefreshToken
+from app.models.auth_tokens import (
+    ApprovalActionToken,
+    LoginAttempt,
+    PasswordResetToken,
+    RefreshToken,
+)
 from app.models.balance_adjustment import (
     AdjustmentCreate,
     AdjustmentField,
@@ -79,6 +77,8 @@ __all__ = [
     "LeaveBalance",
     "RefreshToken",
     "LoginAttempt",
+    "PasswordResetToken",
+    "ApprovalActionToken",
     "LeaveBalanceAdjustment",
     "AdjustmentField",
     "AdjustmentCreate",

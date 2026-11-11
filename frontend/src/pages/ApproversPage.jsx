@@ -75,15 +75,8 @@ export default function ApproversPage() {
 
   const openEdit = (row) => {
     setEditing(row)
-    // Start from the current set; for an employee with none yet, pre-select the
-    // supervisor (FR-APR-2).
-    setSelected(
-      row.approvers.length > 0
-        ? row.approvers.map((approver) => approver.id)
-        : row.supervisor_id
-          ? [row.supervisor_id]
-          : [],
-    )
+    // Start strictly from the currently assigned approvers (D-214: no auto pre-selection)
+    setSelected(row.approvers.map((approver) => approver.id))
     setSearch('')
     setError('')
     setNotice('')

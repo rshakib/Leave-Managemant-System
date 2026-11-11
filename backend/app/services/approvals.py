@@ -1,14 +1,4 @@
-"""Approval actions (FR-LR-4) and a reconciliation check.
-
-LOCK ORDER — always the same, everywhere:
-    1. the `leave_request` row (SELECT ... FOR UPDATE), then
-    2. that request's `leave_balance` rows, ordered by leave_year_id.
-`submit()` in services/leave_requests.py uses the same order (employee row, then
-balances by year). Taking locks in one global order means two transactions can
-never each hold what the other needs, which is exactly what a deadlock is. Every
-approver of the SAME request also serialises on the request lock, so two
-simultaneous decisions cannot both "win".
-"""
+"""Leave request approval actions and balance reconciliation."""
 
 import datetime
 from decimal import Decimal
@@ -50,8 +40,7 @@ async def act(
     action: Action,
     comment: str | None,
 ) -> LeaveRequest:
-    """Approve or reject one request, in a single transaction."""
-    # Step 1: does this actor even have a row? (404 == "request not found")
+    """Approve or reject one request in a single transaction."""
     approval = await session.scalar(
         select(LeaveRequestApproval).where(
             LeaveRequestApproval.leave_request_id == request_id,
@@ -61,14 +50,11 @@ async def act(
     if approval is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Leave request not found.")
 
-    # Step 2: lock the request row, then re-read it and all approvals.
     request = await session.scalar(
         select(LeaveRequest)
         .where(LeaveRequest.id == request_id)
         .with_for_update()
-        # populate_existing: SQLAlchemy would otherwise hand back the stale copy
-        # already in the session's identity map (loaded before we took the lock),
-        # and a double-click would be applied twice.
+        # Reload past the session identity map after acquiring the row lock.
         .execution_options(populate_existing=True)
     )
     if request is None:
@@ -83,7 +69,6 @@ async def act(
         )
     ).all()
 
-    # Step 3: the pure rules decide.
     try:
         decision = decide(
             request.status,
@@ -96,9 +81,6 @@ async def act(
         await session.rollback()
         raise HTTPException(exc.http_status, exc.message) from None
 
-    # Step 4: move or release the reserved days, using the allocation rows.
-    # `balances` stays empty when this decision changes no balance (an
-    # intermediate approval), so the audit snapshot below always has something.
     balances: dict = {}
     if decision.balance_effect is not BalanceEffect.NONE:
         allocations = (
@@ -142,7 +124,6 @@ async def act(
 
     before_balances = balance_snapshot(balances)
 
-    # Step 5: write the statuses.
     now = datetime.datetime.now(datetime.timezone.utc)
     actor_row = None
     for row in approvals:
@@ -159,7 +140,6 @@ async def act(
     if decision.request_status != RequestStatus.PENDING:
         request.final_decided_at = now
 
-    # Queue the notification INSIDE this transaction (D-19).
     await session.flush()
     if decision.request_status == RequestStatus.APPROVED:
         event = "APPROVED"
@@ -221,12 +201,7 @@ async def act(
 async def reconcile_balances(
     session: AsyncSession, employee_id: int
 ) -> list[dict]:
-    """READ-ONLY invariant check: balances must match the requests.
-
-    expected pending = sum of allocation days of this employee's PENDING requests
-    expected used    = sum of allocation days of this employee's APPROVED requests
-    Returns a list of mismatches; an empty list means everything is consistent.
-    """
+    """Return read-only balance mismatches against requests and adjustments."""
     rows = (
         await session.execute(
             select(
@@ -254,7 +229,6 @@ async def reconcile_balances(
         elif request_status == RequestStatus.APPROVED:
             bucket["used"] += Decimal(days)
 
-    # Manual USED adjustments are part of the truth as well (D-156).
     for leave_type_id, leave_year_id, days in (
         await session.execute(
             select(
@@ -334,7 +308,6 @@ async def pending_request_count(session: AsyncSession, employee_id: int) -> int:
 
 
 async def pending_approval_count(session: AsyncSession, approver_id: int) -> int:
-    """How many PENDING decisions this person still owes."""
     count = await session.scalar(
         select(func.count())
         .select_from(LeaveRequestApproval)

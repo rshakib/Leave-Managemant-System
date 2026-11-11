@@ -23,7 +23,9 @@ import LeaveYearsPage from './pages/LeaveYearsPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import MyBalancesPage from './pages/MyBalancesPage.jsx'
 import MyLeaveRequestsPage from './pages/MyLeaveRequestsPage.jsx'
+import QuickApprovalPage from './pages/QuickApprovalPage.jsx'
 import ResetPasswordPage from './pages/ResetPasswordPage.jsx'
+import TeamBalancesPage from './pages/TeamBalancesPage.jsx'
 
 export default function App() {
   return (
@@ -31,6 +33,7 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/quick-approval" element={<QuickApprovalPage />} />
 
       {/* Everything below requires a logged-in user. */}
       <Route element={<ProtectedRoute />}>
@@ -41,6 +44,11 @@ export default function App() {
           <Route path="leave-requests/new" element={<LeaveRequestFormPage />} />
           <Route path="leave-requests/:id" element={<LeaveRequestDetailPage />} />
           <Route path="my-requests" element={<MyLeaveRequestsPage />} />
+
+          {/* Supervisor / Admin team balances screen. */}
+          <Route element={<ProtectedRoute requireSupervisor />}>
+            <Route path="team-balances" element={<TeamBalancesPage />} />
+          </Route>
 
           {/* Admin-only screens. */}
           {/* Approver-only screen. */}

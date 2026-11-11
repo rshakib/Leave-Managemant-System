@@ -1,4 +1,4 @@
-"""Shared helpers for leave balances (FR-LT-3)."""
+"""Leave balance helpers."""
 
 from decimal import Decimal
 
@@ -26,7 +26,7 @@ async def find_active_leave_year(session: AsyncSession) -> LeaveYear | None:
 async def resolve_leave_year(
     session: AsyncSession, leave_year_id: int | None
 ) -> LeaveYear:
-    """Return the requested year, or the active one. Rejects closed years."""
+    """Return the requested or active open leave year."""
     if leave_year_id is None:
         year = await find_active_leave_year(session)
         if year is None:
@@ -47,14 +47,12 @@ async def resolve_leave_year(
 
 
 def available_of(balance: LeaveBalance) -> Decimal:
-    """The computed balance: allocated + carried_forward - used - pending."""
     return (
         balance.allocated + balance.carried_forward - balance.used - balance.pending
     )
 
 
 def available_after(balance: LeaveBalance | None, allocated: Decimal) -> Decimal:
-    """"What `available` would become with this allocation (used/pending kept)."""
     if balance is None:
         return allocated
     return (
@@ -65,7 +63,7 @@ def available_after(balance: LeaveBalance | None, allocated: Decimal) -> Decimal
 async def build_balance_reads(
     session: AsyncSession, balances: list[LeaveBalance]
 ) -> list[LeaveBalanceRead]:
-    """Attach employee / leave type / leave year details and compute `available`."""
+    """Attach employee, leave type, and leave year metadata with computed availability."""
     if not balances:
         return []
 

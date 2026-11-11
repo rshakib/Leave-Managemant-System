@@ -114,13 +114,9 @@ def test_an_assigned_approver_gets_403():
     assert error.value.code == "forbidden"
 
 
-def test_the_requester_cannot_cancel_an_approved_request():
-    """The employee may withdraw a request only while it is still pending."""
-    with pytest.raises(CancelError) as error:
-        cancel(status=APPROVED, actor=REQUESTER)
-    assert error.value.http_status == 403
-    assert error.value.code == "forbidden"
-    assert "administrator" in error.value.message.lower()
+def test_the_requester_can_cancel_an_approved_request():
+    decision = cancel(status=APPROVED, actor=REQUESTER)
+    assert decision.balance_effect is BalanceEffect.RESTORE_USED
 
 
 def test_an_approver_cannot_cancel_an_approved_request():
@@ -183,9 +179,9 @@ def test_can_cancel_matches_the_rule_for_pending_requests():
     assert can_cancel(PENDING, REQUESTER, APPROVER, False) is False
 
 
-def test_can_cancel_for_approved_requests_is_admin_only():
+def test_can_cancel_for_approved_requests_allows_requester_and_admin():
     assert can_cancel(APPROVED, REQUESTER, ADMIN, True) is True
-    assert can_cancel(APPROVED, REQUESTER, REQUESTER, False) is False
+    assert can_cancel(APPROVED, REQUESTER, REQUESTER, False) is True
     assert can_cancel(APPROVED, REQUESTER, APPROVER, False) is False
 
 
@@ -213,3 +209,25 @@ def test_status_can_be_an_enum_like_value():
         value = PENDING
 
     assert cancel(status=Fake()).balance_effect is BalanceEffect.RELEASE
+
+
+def test_cancellation_refused_once_leave_has_started_or_passed():
+    from datetime import date
+    today = date(2026, 10, 29)
+    past_start = date(2026, 8, 17)
+
+    with pytest.raises(CancelError) as err:
+        decide_cancel(
+            APPROVED, REQUESTER, ADMIN, True, True, [], "cancel reason",
+            start_date=past_start, today=today,
+        )
+    assert err.value.code == "leave_already_started"
+    assert err.value.http_status == 400
+
+    assert can_cancel(APPROVED, REQUESTER, ADMIN, True, start_date=past_start, today=today) is False
+    assert can_cancel(PENDING, REQUESTER, REQUESTER, False, start_date=past_start, today=today) is False
+
+    # Future leave (today < start_date) allows cancellation
+    future_start = date(2026, 11, 15)
+    assert can_cancel(APPROVED, REQUESTER, ADMIN, True, start_date=future_start, today=today) is True
+    assert can_cancel(PENDING, REQUESTER, REQUESTER, False, start_date=future_start, today=today) is True

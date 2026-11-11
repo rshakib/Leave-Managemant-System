@@ -1,11 +1,4 @@
-"""Seed five demo employees into the local database (idempotent by employee code).
-
-    ./venv/bin/python -m app.cli.seed_employees
-
-They are placed into the SOLshare divisions/departments created by
-`app.cli.seed_org`, and share one random password written to
-backend/demo_credentials.txt (mode 600, git-ignored).
-"""
+"""Seed demo employees into the local database (``python -m app.cli.seed_employees``)."""
 
 import asyncio
 import os
@@ -24,7 +17,6 @@ from app.models.employee import Employee, EmployeeRole, Role
 
 CREDENTIALS = "demo_credentials.txt"
 
-# name, designation, division, department, joining date
 PEOPLE = [
     ("DEMO-101", "Rashed Karim", "Software Engineer", "Technology", "Software & Platform", date(2023, 2, 1)),
     ("DEMO-102", "Ayesha Siddiqua", "Accounts Officer", "Corporate", "Finance & Accounts", date(2023, 7, 16)),

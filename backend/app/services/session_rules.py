@@ -1,13 +1,8 @@
-"""Pure rules for the "where am I signed in" list (DECISIONS D-191).
-
-One session is one refresh-token FAMILY: every sign-in opens a family, and every
-refresh replaces the token inside the same family (D-163). That is why a family,
-not a token row, is what the employee sees in the list.
-"""
+"""Pure rules for formatting and filtering active refresh-token sessions."""
 
 import datetime
 
-# Order matters: Edge and Opera also say "Chrome", and Chrome also says "Safari".
+# Match specific browsers before generic Chromium/Safari fallback tokens.
 _BROWSERS = (
     ("edg/", "Edge"),
     ("opr/", "Opera"),
@@ -18,7 +13,7 @@ _BROWSERS = (
     ("safari/", "Safari"),
 )
 
-# Order matters here too: iPad also says "Mac OS X".
+# Match iPad before macOS because iPad User-Agents can contain Mac OS X.
 _SYSTEMS = (
     ("iphone", "iPhone"),
     ("ipad", "iPad"),
@@ -34,12 +29,7 @@ UNKNOWN_DEVICE = "Unknown device"
 
 
 def summarise_user_agent(user_agent: str | None) -> str:
-    """A short, human name for a browser/OS pair.
-
-    The raw string is never shown on its own: it is long, ugly, and easy to make
-    look like something else. Anything we cannot recognise becomes
-    "Unknown device" rather than a guess.
-    """
+    """Return a concise browser/OS label for a User-Agent string."""
     value = (user_agent or "").lower()
     if not value.strip():
         return UNKNOWN_DEVICE
@@ -64,13 +54,6 @@ def is_active_session(
     now: datetime.datetime,
     family_max_days: int,
 ) -> bool:
-    """Is this token row a session the employee is still signed in with?
-
-    A row stops being a live session when it was revoked, when it was replaced by
-    a rotation, when the token itself expired, or when the whole family is older
-    than the family limit (D-163) — the same four ways `classify_refresh` refuses
-    a refresh, so the list can never show a session the API would reject.
-    """
     if revoked_at is not None or replaced_at is not None:
         return False
     if expires_at is None or expires_at <= now:
@@ -81,7 +64,6 @@ def is_active_session(
 
 
 def session_sort_key(session: dict) -> tuple:
-    """Newest activity first; a session that never refreshed falls back to its age."""
     stamp = session.get("last_used_at") or session.get("created_at")
     return (stamp, str(session.get("id")))
 

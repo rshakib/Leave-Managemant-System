@@ -1,17 +1,11 @@
-"""Business logic and database transactions for early return / leave curtailment.
-
-Follows the global lock order:
-    1. leave_request row (SELECT ... FOR UPDATE)
-    2. leave_curtailment row (SELECT ... FOR UPDATE)
-    3. leave_balance rows ordered by leave_year_id (SELECT ... FOR UPDATE)
-"""
+"""Early return / leave curtailment service."""
 
 import datetime
 from decimal import Decimal
 from typing import Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import load_roles
@@ -42,14 +36,48 @@ from app.services.curtailment_rules import (
     validate_curtailment_dates,
 )
 from app.services.day_calc import DayCalcError
+from app.services.leave_requests import active_approvers
+from app.services.notifications import balances_after, enqueue_events
 from app.services.request_rules import split_days_by_leave_year
+
+
+async def _get_approvers_for_curtailment(
+    session: AsyncSession, request: LeaveRequest
+) -> list[dict]:
+    approvers = await active_approvers(session, request.employee_id)
+    if not approvers:
+        assigned_ids = (
+            await session.scalars(
+                select(LeaveRequestApproval.approver_id).where(
+                    LeaveRequestApproval.leave_request_id == request.id
+                )
+            )
+        ).all()
+        if assigned_ids:
+            approvers = list(
+                (
+                    await session.scalars(
+                        select(Employee).where(
+                            Employee.id.in_(assigned_ids),
+                            Employee.is_active.is_(True),
+                        )
+                    )
+                ).all()
+            )
+    return [
+        {
+            "id": a.id,
+            "name": a.full_name,
+            "email": a.email,
+            "is_active": a.is_active,
+        }
+        for a in approvers
+    ]
 
 
 async def _check_curtailment_eligibility(
     session: AsyncSession, request: LeaveRequest
 ) -> tuple[bool, Optional[str]]:
-    """Check if the leave request can currently be curtailed."""
-    # 1. Closed year check
     allocations = (
         await session.scalars(
             select(LeaveRequestAllocation).where(
@@ -67,7 +95,6 @@ async def _check_curtailment_eligibility(
     )
     touches_closed_year = closed_count is not None
 
-    # 2. Check for active pending curtailment
     pending_curtailment = await session.scalar(
         select(LeaveCurtailment.id).where(
             LeaveCurtailment.leave_request_id == request.id,
@@ -76,7 +103,6 @@ async def _check_curtailment_eligibility(
     )
     has_pending = pending_curtailment is not None
 
-    # 3. Check if curtailable (multi-day or 1-day full day)
     is_curtailable = (
         request.start_date < request.end_date
         or (
@@ -86,11 +112,19 @@ async def _check_curtailment_eligibility(
         )
     )
 
+    import zoneinfo
+    from app.core.config import settings
+
+    today = datetime.datetime.now(zoneinfo.ZoneInfo(settings.org_timezone)).date()
+
     return can_request_curtailment(
         request_status=request.status,
         touches_closed_year=touches_closed_year,
         has_pending_curtailment=has_pending,
         is_curtailable=is_curtailable,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        today=today,
     )
 
 
@@ -101,7 +135,6 @@ async def get_curtailment_preview(
     curtailed_end_date: datetime.date,
     curtailed_day_type: Optional[str] = "FULL_DAY",
 ) -> CurtailmentPreview:
-    """Calculate the preview for an early return, returning new chargeable days and refund."""
     request = await session.get(LeaveRequest, request_id)
     if request is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Leave request not found.")
@@ -207,7 +240,6 @@ async def submit_curtailment(
     request_id: int,
     payload: CurtailmentCreate,
 ) -> LeaveCurtailment:
-    """Submit an early return request for an approved leave."""
     reason = payload.reason.strip()
     if len(reason) < 3 or len(reason) > 1000:
         raise HTTPException(
@@ -215,7 +247,6 @@ async def submit_curtailment(
             "Early return reason must be between 3 and 1000 characters.",
         )
 
-    # 1. Lock the leave request row
     request = await session.scalar(
         select(LeaveRequest)
         .where(LeaveRequest.id == request_id)
@@ -297,6 +328,31 @@ async def submit_curtailment(
         },
     )
 
+    approver_list = await _get_approvers_for_curtailment(session, request)
+    leave_type = await session.get(LeaveType, request.leave_type_id)
+    curtailment_facts = {
+        "curtailment_id": curtailment.id,
+        "request_id": request.id,
+        "employee_code": employee.employee_code if employee else "",
+        "employee_name": employee.full_name if employee else "",
+        "employee_email": employee.email if employee else "",
+        "leave_type_code": leave_type.code if leave_type else "",
+        "leave_type_name": leave_type.name if leave_type else "",
+        "start_date": str(request.start_date),
+        "original_end_date": str(curtailment.original_end_date),
+        "end_date": str(curtailment.original_end_date),
+        "curtailed_end_date": str(curtailment.curtailed_end_date),
+        "curtailed_day_type": curtailment.curtailed_day_type,
+        "original_days": str(curtailment.original_days),
+        "new_days": str(curtailment.new_days),
+        "chargeable_days": str(curtailment.new_days),
+        "days_to_refund": str(curtailment.days_to_refund),
+        "reason": curtailment.reason,
+        "curtailment_reason": curtailment.reason,
+        "approvers": approver_list,
+    }
+    await enqueue_events(session, "CURTAILMENT_SUBMITTED", curtailment_facts)
+
     await session.commit()
     await session.refresh(curtailment)
     return curtailment
@@ -305,12 +361,10 @@ async def submit_curtailment(
 async def _assert_approver_or_admin(
     session: AsyncSession, actor: Employee, request: LeaveRequest
 ) -> None:
-    """Verify actor is an assigned approver of this request, employee's active approver, or Admin."""
     roles = set(await load_roles(session, actor.id))
     if Role.ADMIN in roles:
         return
 
-    # Check assigned approver for this request
     assigned = await session.scalar(
         select(LeaveRequestApproval.id).where(
             LeaveRequestApproval.leave_request_id == request.id,
@@ -320,7 +374,6 @@ async def _assert_approver_or_admin(
     if assigned is not None:
         return
 
-    # Check active approver for this employee
     active_appr = await session.scalar(
         select(EmployeeApprover.id).where(
             EmployeeApprover.employee_id == request.employee_id,
@@ -343,13 +396,11 @@ async def approve_curtailment(
     curtailment_id: int,
     note: Optional[str] = None,
 ) -> LeaveCurtailment:
-    """Approve an early return request: update request dates and refund used days back to balance."""
-    # Lock Order: 1. LeaveRequest, 2. LeaveCurtailment, 3. LeaveBalances
+    """Approve an early return request and refund unused days to employee balances."""
     curtailment_peek = await session.get(LeaveCurtailment, curtailment_id)
     if curtailment_peek is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Early return request not found.")
 
-    # 1. Lock LeaveRequest
     request = await session.scalar(
         select(LeaveRequest)
         .where(LeaveRequest.id == curtailment_peek.leave_request_id)
@@ -361,7 +412,6 @@ async def approve_curtailment(
 
     await _assert_approver_or_admin(session, actor, request)
 
-    # 2. Lock LeaveCurtailment
     curtailment = await session.scalar(
         select(LeaveCurtailment)
         .where(LeaveCurtailment.id == curtailment_id)
@@ -383,7 +433,6 @@ async def approve_curtailment(
             f"Associated leave request is no longer APPROVED (status is {request.status}).",
         )
 
-    # 3. Calculate year splits for the new curtailed period
     allocations = (
         await session.scalars(
             select(LeaveRequestAllocation)
@@ -405,7 +454,6 @@ async def approve_curtailment(
     all_years = list((await session.scalars(select(LeaveYear))).all())
     new_splits = split_days_by_leave_year(new_preview.days, all_years, target_day_type)
 
-    # 4. Lock LeaveBalance rows ordered by leave_year_id
     balances = {
         b.leave_year_id: b
         for b in (
@@ -424,7 +472,6 @@ async def approve_curtailment(
 
     before_balances = balance_snapshot(balances)
 
-    # 5. Refund used balance per year and update allocations
     for alloc in allocations:
         old_alloc_days = Decimal(str(alloc.days))
         new_alloc_days = new_splits.get(alloc.leave_year_id, Decimal("0"))
@@ -436,20 +483,17 @@ async def approve_curtailment(
                 balance.used = max(Decimal("0"), Decimal(str(balance.used)) - refund_for_year)
             alloc.days = new_alloc_days
 
-    # 6. Update request dates and chargeable days
     request.end_date = curtailment.curtailed_end_date
     request.chargeable_days = curtailment.new_days
     if curtailment.curtailed_day_type:
         request.day_type = curtailment.curtailed_day_type
 
-    # 7. Mark curtailment as APPROVED
     now = datetime.datetime.now(datetime.timezone.utc)
     curtailment.status = CurtailmentStatus.APPROVED
     curtailment.decided_at = now
     curtailment.decided_by_id = actor.id
     curtailment.decision_note = note.strip() if note else None
 
-    # 8. Audit log
     await record(
         session,
         actor.id,
@@ -466,6 +510,33 @@ async def approve_curtailment(
         old={"balances": before_balances},
     )
 
+    employee = await session.get(Employee, request.employee_id)
+    leave_type = await session.get(LeaveType, request.leave_type_id)
+    approver_list = await _get_approvers_for_curtailment(session, request)
+    curtailment_facts = {
+        "curtailment_id": curtailment.id,
+        "request_id": request.id,
+        "employee_code": employee.employee_code if employee else "",
+        "employee_name": employee.full_name if employee else "",
+        "employee_email": employee.email if employee else "",
+        "leave_type_code": leave_type.code if leave_type else "",
+        "leave_type_name": leave_type.name if leave_type else "",
+        "start_date": str(request.start_date),
+        "original_end_date": str(curtailment.original_end_date),
+        "curtailed_end_date": str(curtailment.curtailed_end_date),
+        "curtailed_day_type": curtailment.curtailed_day_type,
+        "original_days": str(curtailment.original_days),
+        "new_days": str(curtailment.new_days),
+        "chargeable_days": str(curtailment.new_days),
+        "days_to_refund": str(curtailment.days_to_refund),
+        "actor_name": actor.full_name,
+        "actor_email": actor.email,
+        "decision_note": curtailment.decision_note,
+        "balances": await balances_after(session, request),
+        "approvers": approver_list,
+    }
+    await enqueue_events(session, "CURTAILMENT_APPROVED", curtailment_facts)
+
     await session.commit()
     await session.refresh(curtailment)
     return curtailment
@@ -477,7 +548,6 @@ async def reject_curtailment(
     curtailment_id: int,
     note: str,
 ) -> LeaveCurtailment:
-    """Reject an early return request."""
     note_clean = (note or "").strip()
     if len(note_clean) < 3 or len(note_clean) > 1000:
         raise HTTPException(
@@ -525,6 +595,32 @@ async def reject_curtailment(
         },
     )
 
+    employee = await session.get(Employee, request.employee_id)
+    leave_type = await session.get(LeaveType, request.leave_type_id)
+    approver_list = await _get_approvers_for_curtailment(session, request)
+    curtailment_facts = {
+        "curtailment_id": curtailment.id,
+        "request_id": request.id,
+        "employee_code": employee.employee_code if employee else "",
+        "employee_name": employee.full_name if employee else "",
+        "employee_email": employee.email if employee else "",
+        "leave_type_code": leave_type.code if leave_type else "",
+        "leave_type_name": leave_type.name if leave_type else "",
+        "start_date": str(request.start_date),
+        "original_end_date": str(curtailment.original_end_date),
+        "curtailed_end_date": str(curtailment.curtailed_end_date),
+        "curtailed_day_type": curtailment.curtailed_day_type,
+        "original_days": str(curtailment.original_days),
+        "new_days": str(curtailment.new_days),
+        "chargeable_days": str(curtailment.new_days),
+        "days_to_refund": str(curtailment.days_to_refund),
+        "actor_name": actor.full_name,
+        "actor_email": actor.email,
+        "decision_note": curtailment.decision_note,
+        "approvers": approver_list,
+    }
+    await enqueue_events(session, "CURTAILMENT_REJECTED", curtailment_facts)
+
     await session.commit()
     await session.refresh(curtailment)
     return curtailment
@@ -535,7 +631,6 @@ async def cancel_curtailment(
     actor: Employee,
     curtailment_id: int,
 ) -> LeaveCurtailment:
-    """Cancel a pending early return request by requester or admin."""
     curtailment = await session.scalar(
         select(LeaveCurtailment)
         .where(LeaveCurtailment.id == curtailment_id)
@@ -575,7 +670,6 @@ async def list_curtailments_for_request(
     actor: Employee,
     request_id: int,
 ) -> list[CurtailmentRead]:
-    """List all early return requests for a specific leave request."""
     request = await session.get(LeaveRequest, request_id)
     if request is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Leave request not found.")
@@ -584,7 +678,6 @@ async def list_curtailments_for_request(
     is_admin = Role.ADMIN in roles
     is_owner = request.employee_id == actor.id
     if not (is_admin or is_owner):
-        # Approver check
         is_approver = (
             await session.scalar(
                 select(LeaveRequestApproval.id).where(
@@ -612,24 +705,29 @@ async def list_inbox_curtailments(
     actor: Employee,
     status_filter: CurtailmentStatus = CurtailmentStatus.PENDING,
 ) -> list[CurtailmentRead]:
-    """List early return requests waiting for the caller's approval."""
     roles = set(await load_roles(session, actor.id))
     is_admin = Role.ADMIN in roles
 
     if is_admin:
-        # Admins can see all curtailments
         stmt = select(LeaveCurtailment).where(LeaveCurtailment.status == status_filter)
     else:
-        # Get employees where actor is active approver
         subquery_appr = (
             select(EmployeeApprover.employee_id).where(
                 EmployeeApprover.approver_id == actor.id,
                 EmployeeApprover.is_active.is_(True),
             )
         )
+        subquery_req = (
+            select(LeaveRequestApproval.leave_request_id).where(
+                LeaveRequestApproval.approver_id == actor.id,
+            )
+        )
         stmt = select(LeaveCurtailment).where(
             LeaveCurtailment.status == status_filter,
-            LeaveCurtailment.employee_id.in_(subquery_appr),
+            or_(
+                LeaveCurtailment.employee_id.in_(subquery_appr),
+                LeaveCurtailment.leave_request_id.in_(subquery_req),
+            ),
         )
 
     stmt = stmt.order_by(LeaveCurtailment.submitted_at.desc())
@@ -637,11 +735,49 @@ async def list_inbox_curtailments(
     return await _to_read_models(session, rows)
 
 
+async def count_inbox_curtailments(
+    session: AsyncSession,
+    actor: Employee,
+) -> int:
+    roles = set(await load_roles(session, actor.id))
+    is_admin = Role.ADMIN in roles
+
+    if is_admin:
+        stmt = (
+            select(func.count())
+            .select_from(LeaveCurtailment)
+            .where(LeaveCurtailment.status == CurtailmentStatus.PENDING)
+        )
+    else:
+        subquery_appr = (
+            select(EmployeeApprover.employee_id).where(
+                EmployeeApprover.approver_id == actor.id,
+                EmployeeApprover.is_active.is_(True),
+            )
+        )
+        subquery_req = (
+            select(LeaveRequestApproval.leave_request_id).where(
+                LeaveRequestApproval.approver_id == actor.id,
+            )
+        )
+        stmt = (
+            select(func.count())
+            .select_from(LeaveCurtailment)
+            .where(
+                LeaveCurtailment.status == CurtailmentStatus.PENDING,
+                or_(
+                    LeaveCurtailment.employee_id.in_(subquery_appr),
+                    LeaveCurtailment.leave_request_id.in_(subquery_req),
+                ),
+            )
+        )
+    return (await session.scalar(stmt)) or 0
+
+
 async def list_my_curtailments(
     session: AsyncSession,
     actor: Employee,
 ) -> list[CurtailmentRead]:
-    """List caller's own early return requests."""
     rows = (
         await session.scalars(
             select(LeaveCurtailment)

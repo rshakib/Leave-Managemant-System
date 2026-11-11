@@ -1,12 +1,15 @@
-import { Alert, Container, Spinner } from 'react-bootstrap'
-import { Navigate, Outlet } from 'react-router-dom'
+import { Container, Spinner } from 'react-bootstrap'
+import { Navigate, Outlet, useLocation } from 'react-router-dom'
 
+import AccessState from '../components/AccessState.jsx'
 import { useAuth } from './AuthContext.jsx'
+import { buildLoginUrl } from './redirectUtils.js'
 
-// Blocks a route until the user is known to be logged in. With a `roles` prop
-// it also blocks users who do not hold at least one of those roles.
-export default function ProtectedRoute({ roles }) {
+// Blocks a route until the user is known to be logged in. With `roles` or
+// `requireSupervisor`, blocks users who lack the required access.
+export default function ProtectedRoute({ roles, requireSupervisor = false }) {
   const { user, loading } = useAuth()
+  const location = useLocation()
 
   if (loading) {
     return (
@@ -18,16 +21,15 @@ export default function ProtectedRoute({ roles }) {
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />
+    return <Navigate to={buildLoginUrl(location)} replace />
   }
 
-  if (roles?.length && !roles.some((role) => user.roles?.includes(role))) {
-    return (
-      <Alert variant="danger">
-        <Alert.Heading>Not allowed</Alert.Heading>
-        <p className="mb-0">You do not have permission to view this page.</p>
-      </Alert>
-    )
+  const hasRole = !roles?.length || roles.some((role) => user.roles?.includes(role))
+  const hasSupervisor =
+    !requireSupervisor || Boolean(user.is_supervisor || user.roles?.includes('ADMIN'))
+
+  if (!hasRole || !hasSupervisor) {
+    return <AccessState variant="restricted" />
   }
 
   return <Outlet />

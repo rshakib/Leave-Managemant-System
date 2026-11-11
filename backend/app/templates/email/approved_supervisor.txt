@@ -1,0 +1,17 @@
+Hello {{ supervisor_name or 'Supervisor' }},
+
+A leave request for {{ employee_name }} (under your supervision) has been approved.
+
+  Employee   : {{ employee_name }}{% if employee_code %} ({{ employee_code }}){% endif %}
+  Leave type : {{ leave_type_name }} ({{ leave_type_code }})
+  Dates      : {{ start_date }} to {{ end_date }}
+  Days       : {{ chargeable_days }}
+{% if reason %}  Reason     : {{ reason }}
+{% endif %}
+{% if balances %}Remaining balance:
+{% for balance in balances %}  {{ balance.leave_year_name }}: {{ balance.available }} day(s)
+{% endfor %}{% endif %}
+Open it here: {{ link }}
+
+-- Leave Management System
+

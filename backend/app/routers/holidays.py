@@ -56,7 +56,6 @@ async def _resolve_scope(
     division_id: int | None,
     department_id: int | None,
 ) -> tuple[int | None, int | None]:
-    """A department also carries its division, so a scope is always consistent."""
     if department_id is not None:
         department = await session.get(Department, department_id)
         if department is None:
@@ -108,7 +107,6 @@ async def create_holidays(
     session: AsyncSession = Depends(get_session),
     actor: Employee = Depends(get_current_user),
 ) -> list[HolidayRead]:
-    """Create one holiday per date (a date range is expanded into rows)."""
     year = await _leave_year_or_404(session, payload.leave_year_id)
     dates = payload.dates
     _check_inside_year(year, dates)
@@ -241,11 +239,6 @@ async def delete_holiday(
     session: AsyncSession = Depends(get_session),
     actor: Employee = Depends(get_current_user),
 ) -> None:
-    """FR-CAL-3 allows deleting holidays.
-
-    Safe because nothing references a holiday row yet; from Phase 10 on, a
-    deleted holiday only affects requests that were never reserved against it.
-    """
     holiday = await session.get(Holiday, holiday_id)
     if holiday is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Holiday not found.")
@@ -264,7 +257,6 @@ async def import_holidays(
     session: AsyncSession = Depends(get_session),
     actor: Employee = Depends(get_current_user),
 ) -> HolidayImportResult:
-    """Import holidays from a CSV file. All-or-nothing (DECISIONS D-73)."""
     year = await _leave_year_or_404(session, leave_year_id)
 
     raw = await file.read()
@@ -273,7 +265,6 @@ async def import_holidays(
             status.HTTP_400_BAD_REQUEST, "The CSV file is larger than 1 MB."
         )
     try:
-        # utf-8-sig also reads a plain UTF-8 file; a BOM is simply stripped.
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise HTTPException(
@@ -300,7 +291,7 @@ async def import_holidays(
     prepared: list[dict[str, object]] = []
     seen: set[tuple[datetime.date, int | None, int | None]] = set()
 
-    for index, row in enumerate(rows, start=2):  # row 1 is the header row
+    for index, row in enumerate(rows, start=2):
         raw_date = (row.get("date") or "").strip()
         try:
             holiday_date = datetime.date.fromisoformat(raw_date)
@@ -431,7 +422,6 @@ async def import_holidays(
         rows = [Holiday(leave_year_id=year.id, **item) for item in prepared]
         session.add_all(rows)
         await session.flush()
-        # ONE row for the whole import (the ids let you find the detail rows).
         await record(
             session, actor.id, "holiday", None, "IMPORT",
             new={

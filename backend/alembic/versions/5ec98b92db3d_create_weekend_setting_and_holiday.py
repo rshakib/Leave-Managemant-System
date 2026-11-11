@@ -3,16 +3,6 @@
 Revision ID: 5ec98b92db3d
 Revises: c4e60f6f17d8
 Create Date: 2026-10-25 16:06:19.812856
-
-Creates the weekend configuration and holiday tables (FR-CAL-1/2/3) and enables
-Row Level Security on both.
-
-Two UNIQUE quirks are handled here:
-- `weekend_setting` gets TWO partial unique indexes because a plain
-  `UNIQUE(employee_id)` would allow many NULL rows (D-08).
-- `holiday` uses an expression index over `COALESCE(...)` because a plain
-  `UNIQUE(date, division_id, department_id)` would not catch duplicates when the
-  scope columns are NULL.
 """
 from typing import Sequence, Union
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Col, Form, Row, Spinner, Table } from 'react-bootstrap'
+import { Alert, Button, Col, Form, Row, Spinner, Table } from 'react-bootstrap'
 import { useNavigate } from 'react-router-dom'
 
 import api, { errorMessage } from '../api/client'
@@ -8,6 +8,7 @@ import RequestStatusBadge from '../components/RequestStatusBadge'
 import { useAutoRefresh } from '../hooks/useAutoRefresh.js'
 
 const STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']
+const PAGE_SIZE = 20
 
 function days(value) {
   const number = Number(value)
@@ -22,10 +23,11 @@ export default function MyLeaveRequestsPage() {
   const [status, setStatus] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [offset, setOffset] = useState(0)
 
   const loadRequests = useCallback(async () => {
     try {
-      const params = {}
+      const params = { limit: PAGE_SIZE, offset }
       if (status) params.status = status
       if (dateFrom) params.date_from = dateFrom
       if (dateTo) params.date_to = dateTo
@@ -37,7 +39,7 @@ export default function MyLeaveRequestsPage() {
     } finally {
       setLoading(false)
     }
-  }, [status, dateFrom, dateTo])
+  }, [status, dateFrom, dateTo, offset])
 
   useEffect(() => {
     loadRequests()
@@ -65,7 +67,10 @@ export default function MyLeaveRequestsPage() {
             size="sm"
             aria-label="Filter by status"
             value={status}
-            onChange={(event) => setStatus(event.target.value)}
+            onChange={(event) => {
+              setStatus(event.target.value)
+              setOffset(0)
+            }}
           >
             <option value="">Any status</option>
             {STATUSES.map((value) => (
@@ -81,6 +86,7 @@ export default function MyLeaveRequestsPage() {
           onChange={({ dateFrom: df, dateTo: dt }) => {
             setDateFrom(df)
             setDateTo(dt)
+            setOffset(0)
           }}
         />
       </Row>
@@ -94,38 +100,64 @@ export default function MyLeaveRequestsPage() {
           You have no leave requests{status ? ` with status ${status}` : ''} yet.
         </div>
       ) : (
-        <Table striped bordered hover responsive>
-          <thead>
-            <tr>
-              <th>Leave type</th>
-              <th>Dates</th>
-              <th className="text-end">Days</th>
-              <th>Status</th>
-              <th>Submitted</th>
-            </tr>
-          </thead>
-          <tbody>
-            {requests.map((request) => (
-              <tr
-                key={request.id}
-                role="button"
-                onClick={() => navigate(`/leave-requests/${request.id}`)}
-              >
-                <td>
-                  {request.leave_type_code} — {request.leave_type_name}
-                </td>
-                <td>
-                  {request.start_date} → {request.end_date}
-                </td>
-                <td className="text-end">{days(request.chargeable_days)}</td>
-                <td>
-                  <RequestStatusBadge status={request.status} />
-                </td>
-                <td>{new Date(request.submitted_at).toLocaleString()}</td>
+        <>
+          <Table striped bordered hover responsive>
+            <thead>
+              <tr>
+                <th>Leave type</th>
+                <th>Dates</th>
+                <th className="text-end">Days</th>
+                <th>Status</th>
+                <th>Submitted</th>
               </tr>
-            ))}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {requests.map((request) => (
+                <tr
+                  key={request.id}
+                  role="button"
+                  onClick={() => navigate(`/leave-requests/${request.id}`)}
+                >
+                  <td>
+                    {request.leave_type_code} — {request.leave_type_name}
+                  </td>
+                  <td>
+                    {request.start_date} → {request.end_date}
+                  </td>
+                  <td className="text-end">{days(request.chargeable_days)}</td>
+                  <td>
+                    <RequestStatusBadge status={request.status} />
+                  </td>
+                  <td>{new Date(request.submitted_at).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+
+          {(offset > 0 || requests.length === PAGE_SIZE) && (
+            <div className="d-flex justify-content-between align-items-center mt-3">
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                disabled={offset === 0}
+                onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+              >
+                ← Previous
+              </Button>
+              <span className="small text-muted">
+                Showing {requests.length} row(s) from #{offset + 1}
+              </span>
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                disabled={requests.length < PAGE_SIZE}
+                onClick={() => setOffset(offset + PAGE_SIZE)}
+              >
+                Next →
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </>
   )

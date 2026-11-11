@@ -10,7 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.config import BACKEND_DIR, settings
 from app.db.session import get_session
 from app.routers.events import router as events_router
 from app.services import events
@@ -41,9 +41,6 @@ from app.routers import (
 
 logger = logging.getLogger(__name__)
 
-# --- fail-fast configuration (NFR-1, D-166) -----------------------------
-# In production the app REFUSES to start with an unsafe configuration instead of
-# running insecurely. The list never contains a secret value.
 _config_problems = validate_production_settings(settings)
 if str(settings.app_env).lower() == "production" and _config_problems:
     raise RuntimeError(
@@ -84,7 +81,7 @@ async def lifespan(_app):
                 try:
                     await drain_once()
                     now = datetime.datetime.now(datetime.timezone.utc)
-                    if (now - last_reminder).total_seconds() >= 900:
+                    if settings.enable_approval_reminders and (now - last_reminder).total_seconds() >= 900:
                         await reminder_tick()
                         last_reminder = now
                 except asyncio.CancelledError:
@@ -120,18 +117,12 @@ app = FastAPI(
     openapi_url="/openapi.json" if _docs else None,
 )
 
-# Allow the browser app (Vite dev server) to call this API. Explicit origins
-# only — a wildcard "*" is never used.
 app.add_middleware(
     CORSMiddleware,
-    # Explicit origins only — never "*" (a wildcard cannot be combined with
-    # credentials anyway, and it would let any site use the cookie).
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
-    # The browser may READ these headers: Retry-After (the login countdown) and
-    # Content-Disposition (the CSV download filename).
     expose_headers=["Retry-After", "Content-Disposition"],
 )
 
@@ -154,10 +145,8 @@ app.include_router(approvals.router)
 app.include_router(admin_emails.router)
 @app.middleware("http")
 async def security_headers(request, call_next):
-    """Defence in depth: cheap headers on EVERY response, errors included."""
     response = await call_next(request)
 
-    # Any successful write tells the open browser tabs to refetch (SSE).
     if request.method != "GET" and response.status_code < 400:
         events.publish()
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -197,18 +186,12 @@ from app.services.maintenance_rules import readiness_state
 
 
 def _head_revision() -> str | None:
-    """The revision the CODE expects (read from alembic/versions)."""
     config = AlembicConfig(str(BACKEND_DIR / "alembic.ini"))
     return ScriptDirectory.from_config(config).get_current_head()
 
 
 @app.get("/health/ready")
 async def health_ready(session: AsyncSession = Depends(get_session)):
-    """Readiness: database reachable, migrations current, email not stuck.
-
-    It never exposes versions, revisions, hostnames or error text — only short
-    reasons such as "database" or "migrations".
-    """
     db_ok = True
     current = None
     oldest_age = None
@@ -248,11 +231,9 @@ def health() -> dict[str, str]:
 
 @app.get("/health/db")
 async def health_db(session: AsyncSession = Depends(get_session)) -> dict[str, str]:
-    """Check the database is reachable by running SELECT 1."""
     try:
         await session.execute(text("SELECT 1"))
     except SQLAlchemyError as exc:
-        # Log only the exception type so the connection URL is never written out.
         logger.warning("Database health check failed: %s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="database unavailable") from None
     return {"database": "ok"}

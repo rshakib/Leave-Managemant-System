@@ -16,19 +16,10 @@ router = APIRouter(prefix="/admin/audit-log", tags=["audit-log"])
 
 ADMIN_ONLY = [Depends(require_roles(Role.ADMIN))]
 
-# NOTE: there is deliberately NO create/update/delete endpoint here. The only
-# writer is `services/audit.record()`, and the database trigger refuses edits.
-# This router is READ-ONLY by design (DECISIONS D-147).
-
 
 def _day_bounds(
     date_from: datetime.date | None, date_to: datetime.date | None
 ) -> tuple[datetime.datetime | None, datetime.datetime | None]:
-    """Interpret the filter dates in the ORGANISATION's timezone.
-
-    "25 October" means the local day, not the UTC day, so we turn the dates into
-    UTC instants at both ends (the end is exclusive).
-    """
     tz = zoneinfo.ZoneInfo(settings.org_timezone)
     start = (
         datetime.datetime.combine(date_from, datetime.time.min, tzinfo=tz)
@@ -80,7 +71,6 @@ async def list_audit_log(
     if end is not None:
         filters.append(AuditLog.created_at < end)
 
-    # Query 1: this page of rows. Query 2: the total. Query 3: the actor names.
     rows = (
         await session.scalars(
             select(AuditLog)

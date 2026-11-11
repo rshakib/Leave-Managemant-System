@@ -3,13 +3,6 @@
 Revision ID: befce6c4a656
 Revises: 263a99a2d884
 Create Date: 2026-10-25 20:48:12.382358
-
-Adds the year-end rollover log (`leave_carry_forward`, FR-LT-4) and the two
-"who closed this year" columns on `leave_year`.
-
-Existing `leave_year` rows are all `is_closed = false` with `closed_at` NULL,
-because until now nothing but this phase could set `is_closed` (DECISIONS D-53),
-so both new CHECK constraints hold for every existing row without a data fix.
 """
 from typing import Sequence, Union
 

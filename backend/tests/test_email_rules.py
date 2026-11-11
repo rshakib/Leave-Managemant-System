@@ -6,9 +6,13 @@ import pytest
 
 from app.services.email_rules import (
     APPROVED,
+    APPROVED_SUPERVISOR,
     APPROVER_ACTED,
     CANCELLED,
     CANCELLED_EMPLOYEE,
+    CURTAILMENT_APPROVED,
+    CURTAILMENT_REJECTED,
+    CURTAILMENT_SUBMITTED,
     REMINDER,
     REJECTED,
     SUBMITTED,
@@ -74,10 +78,29 @@ def facts(**overrides):
 # --- recipients ------------------------------------------------------------
 
 
-def test_submitted_goes_to_approvers_and_ccs_the_employee():
-    spec = plan_emails(SUBMITTED, facts())[0]
-    assert spec.to_emails == ("bob@example.invalid", "cara@example.invalid")
-    assert spec.cc_emails == ("alice@example.invalid",)
+def test_submitted_goes_to_approvers_only():
+    specs = plan_emails(SUBMITTED, facts())
+    assert len(specs) == 2
+    assert specs[0].to_emails == ("bob@example.invalid",)
+    assert specs[1].to_emails == ("cara@example.invalid",)
+    assert specs[0].cc_emails == ()
+    assert specs[1].cc_emails == ()
+
+
+def test_boss_emails_are_never_planned_as_recipients():
+    spec = plan_emails(
+        SUBMITTED,
+        facts(
+            approvers=[
+                {"name": "Ishtiaque", "email": "ishtiaque.ahmed@solshare.com", "is_active": True},
+                {"name": "Bob", "email": "bob@example.invalid", "is_active": True},
+            ],
+            notify_cc_admin_emails=["raton.hosen@solshare.com", "admin@example.invalid"],
+        ),
+    )[0]
+    assert "ishtiaque.ahmed@solshare.com" not in spec.to_emails
+    assert spec.to_emails == ("bob@example.invalid",)
+    assert spec.cc_emails == ()
 
 
 def test_inactive_or_missing_addresses_are_dropped():
@@ -98,11 +121,11 @@ def test_duplicate_addresses_are_removed_and_case_is_ignored():
     spec = plan_emails(
         SUBMITTED,
         facts(
-            employee_email="BOB@example.invalid",
             approvers=[
                 {"name": "Bob", "email": "bob@example.invalid", "is_active": True},
                 {"name": "Bob again", "email": "Bob@Example.Invalid", "is_active": True},
             ],
+            notify_cc_admin_emails=["BOB@example.invalid"],
         ),
     )[0]
     assert spec.to_emails == ("bob@example.invalid",)
@@ -138,6 +161,68 @@ def test_approved_adds_admin_cc_only_when_enabled():
     assert "hr@example.invalid" in on.cc_emails
 
 
+def test_approved_sends_notification_to_supervisor():
+    specs = plan_emails(
+        APPROVED,
+        facts(
+            supervisor_email="supervisor@example.invalid",
+            supervisor_name="Super Bob",
+            employee_code="EMP-001",
+        ),
+    )
+    assert len(specs) == 2
+    # 1. Employee approval notification
+    emp_spec = specs[0]
+    assert emp_spec.event_type == APPROVED
+    assert emp_spec.to_emails == ("alice@example.invalid",)
+    assert emp_spec.dedupe_key == "approved:7"
+
+    # 2. Supervisor notification
+    sup_spec = specs[1]
+    assert sup_spec.event_type == APPROVED_SUPERVISOR
+    assert sup_spec.to_emails == ("supervisor@example.invalid",)
+    assert sup_spec.cc_emails == ()
+    assert sup_spec.dedupe_key == "approved_supervisor:7"
+    assert sup_spec.payload["supervisor_name"] == "Super Bob"
+    assert sup_spec.payload["employee_name"] == "Alice Example"
+
+
+def test_approved_deduplicates_supervisor_from_cc_if_approver():
+    # If supervisor was also in approvers (e.g. cara@example.invalid),
+    # they receive the dedicated supervisor email and are omitted from employee email's CC.
+    specs = plan_emails(
+        APPROVED,
+        facts(
+            supervisor_email="cara@example.invalid",
+            supervisor_name="Cara",
+        ),
+    )
+    assert len(specs) == 2
+    emp_spec = specs[0]
+    sup_spec = specs[1]
+    # cara was in approvers, but since she gets supervisor email, she is excluded from emp CC
+    assert "cara@example.invalid" not in emp_spec.cc_emails
+    assert sup_spec.to_emails == ("cara@example.invalid",)
+
+
+def test_approved_suppresses_supervisor_if_protected_or_self():
+    # Protected email (Boss Safety Guard)
+    specs_protected = plan_emails(
+        APPROVED,
+        facts(supervisor_email="raton.hosen@solshare.com"),
+    )
+    assert len(specs_protected) == 1
+    assert specs_protected[0].event_type == APPROVED
+
+    # Self as supervisor
+    specs_self = plan_emails(
+        APPROVED,
+        facts(supervisor_email="alice@example.invalid"),
+    )
+    assert len(specs_self) == 1
+    assert specs_self[0].event_type == APPROVED
+
+
 def test_rejected_ccs_the_approvers_and_carries_the_comment():
     spec = plan_emails(REJECTED, facts(actor_name="Cara"))[0]
     assert spec.to_emails == ("alice@example.invalid",)
@@ -170,11 +255,72 @@ def test_reminder_goes_to_one_approver():
     assert spec.to_emails == ("bob@example.invalid",)
 
 
+def test_curtailment_submitted_goes_to_active_approvers():
+    specs = plan_emails(
+        CURTAILMENT_SUBMITTED,
+        facts(
+            curtailment_id=15,
+            original_end_date="2026-11-05",
+            curtailed_end_date="2026-11-03",
+            days_to_refund="2.00",
+            curtailment_reason="Finished project early",
+        ),
+    )
+    assert len(specs) == 2
+    assert specs[0].to_emails == ("bob@example.invalid",)
+    assert specs[0].dedupe_key == "curtailment_submitted:15:2"
+    assert specs[0].payload["days_to_refund"] == "2.00"
+    assert specs[1].to_emails == ("cara@example.invalid",)
+    assert specs[1].dedupe_key == "curtailment_submitted:15:3"
+
+
+def test_curtailment_approved_notifies_employee_and_ccs_approvers():
+    specs = plan_emails(
+        CURTAILMENT_APPROVED,
+        facts(
+            curtailment_id=15,
+            actor_name="Bob",
+            actor_email="bob@example.invalid",
+            original_end_date="2026-11-05",
+            curtailed_end_date="2026-11-03",
+            days_to_refund="2.00",
+            decision_note="Looks good, safe travel",
+        ),
+    )
+    assert len(specs) == 1
+    spec = specs[0]
+    assert spec.to_emails == ("alice@example.invalid",)
+    assert spec.cc_emails == ("cara@example.invalid",)  # Bob (actor) dropped from CC
+    assert spec.dedupe_key == "curtailment_approved:15"
+    assert spec.payload["actor_name"] == "Bob"
+    assert spec.payload["decision_note"] == "Looks good, safe travel"
+
+
+def test_curtailment_rejected_notifies_employee_and_ccs_approvers():
+    specs = plan_emails(
+        CURTAILMENT_REJECTED,
+        facts(
+            curtailment_id=15,
+            actor_name="Cara",
+            actor_email="cara@example.invalid",
+            original_end_date="2026-11-05",
+            curtailed_end_date="2026-11-03",
+            decision_note="Critical deployment on that date",
+        ),
+    )
+    assert len(specs) == 1
+    spec = specs[0]
+    assert spec.to_emails == ("alice@example.invalid",)
+    assert spec.cc_emails == ("bob@example.invalid",)  # Cara (actor) dropped from CC
+    assert spec.dedupe_key == "curtailment_rejected:15"
+    assert spec.payload["decision_note"] == "Critical deployment on that date"
+
+
 # --- dedupe keys -----------------------------------------------------------
 
 
 def test_dedupe_keys_are_stable_and_unique_per_event():
-    assert plan_emails(SUBMITTED, facts())[0].dedupe_key == "submitted:7"
+    assert plan_emails(SUBMITTED, facts())[0].dedupe_key == "submitted:7:2"
     assert plan_emails(APPROVER_ACTED, facts())[0].dedupe_key == "approver_acted:7:11"
     assert plan_emails(APPROVED, facts())[0].dedupe_key == "approved:7"
     assert plan_emails(REJECTED, facts())[0].dedupe_key == "rejected:7"

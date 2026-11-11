@@ -3,10 +3,6 @@
 Revision ID: 83a61549e9e3
 Revises: 8630a284ed68
 Create Date: 2026-10-25 15:00:44.385353
-
-Adds ``employee.password_hash`` (DECISIONS D-38). The column is NOT NULL, which
-is safe because the ``employee`` table was verified empty (0 rows) before this
-migration ran — no backfill or default is needed.
 """
 from typing import Sequence, Union
 

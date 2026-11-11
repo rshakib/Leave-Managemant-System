@@ -178,9 +178,6 @@ async def balances_export(
                 400,
             )
 
-    # Audit BEFORE streaming and commit it here: personal data is about to
-    # leave the system, and the record must exist even if the browser aborts
-    # the download halfway (D-146).
     await record(
         session, actor.id, "report", None, "REPORT_EXPORT",
         new={
@@ -252,7 +249,6 @@ async def history_json(
     )
     body = report.model_dump(mode="json")
     if not include_reason:
-        # The column is opt-in (D-121), so it is not even present in the JSON.
         for row in body["rows"]:
             row.pop("reason", None)
     return JSONResponse(content=body)

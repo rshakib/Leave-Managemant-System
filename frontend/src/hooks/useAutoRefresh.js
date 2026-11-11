@@ -2,16 +2,14 @@ import { useEffect, useRef } from 'react'
 
 import { subscribeToChanges } from '../api/liveUpdates.js'
 
-// Keeps the current view fresh without a manual refresh:
+// Keeps the current view fresh without disruptive manual refreshes:
 //
-//  1. immediately after anything changes in this app (any successful write, or a
-//     write in another tab) — via the live-updates signal;
-//  2. when the tab becomes visible / regains focus (so coming back to a stale
-//     screen pulls everything at once);
-//  3. on a slow background poll, as a safety net for changes made elsewhere.
-//
-// Polling pauses while the tab is hidden, so an idle tab costs nothing.
-export function useAutoRefresh(refresh, { intervalMs = 15000 } = {}) {
+//  1. immediately when real data changes in the system (via SSE "/events" or
+//     cross-tab BroadcastChannel);
+//  2. when the user switches back to this tab (visibility / focus);
+//  3. optionally on a slow background interval if intervalMs > 0 (disabled by
+//     default so no blind repeating timer interrupts active user work).
+export function useAutoRefresh(refresh, { intervalMs = 0 } = {}) {
   const latest = useRef(refresh)
 
   useEffect(() => {
@@ -24,7 +22,7 @@ export function useAutoRefresh(refresh, { intervalMs = 15000 } = {}) {
     }
 
     const unsubscribe = subscribeToChanges(run)
-    const timer = window.setInterval(run, intervalMs)
+    const timer = intervalMs > 0 ? window.setInterval(run, intervalMs) : null
 
     const onActive = () => run()
     document.addEventListener('visibilitychange', onActive)
@@ -32,7 +30,7 @@ export function useAutoRefresh(refresh, { intervalMs = 15000 } = {}) {
 
     return () => {
       unsubscribe()
-      window.clearInterval(timer)
+      if (timer) window.clearInterval(timer)
       document.removeEventListener('visibilitychange', onActive)
       window.removeEventListener('focus', onActive)
     }

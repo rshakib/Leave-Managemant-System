@@ -1,43 +1,4 @@
-"""Year-end closing and carry-forward (FR-LT-4).
-
-LOCKING (the important part)
-============================
-Closing changes MANY balances at once and cannot be undone, so safety comes
-first. The gate is the `leave_year` row itself:
-
-* Every writer of `leave_balance` — and every creator of a leave request — takes
-  a **SHARED** lock (`SELECT ... FOR SHARE`) on the leave-year rows it is about
-  to touch, and THEN re-checks `is_closed`. Several writers may hold a shared
-  lock at the same time, so ordinary work is not serialised.
-* Closing takes an **EXCLUSIVE** lock (`SELECT ... FOR UPDATE`) on the from-year
-  and the to-year. While a closing holds it, every writer for those years waits;
-  while a writer holds a shared lock, the closing waits.
-
-So exactly one of these happens: the writer finishes first and the closing then
-sees its rows, or the closing finishes first and the writer wakes up to
-`is_closed = true` and is refused (HTTP 409). Never "both succeeded".
-
-* The ONE global lock order is: **leave years -> employee row -> balance rows**.
-  Years are locked in ascending id order. A closing touches employee rows only
-  *after* the year (through the `closed_by_id` / `processed_by` foreign keys,
-  which take a KEY SHARE lock on the referenced employee), and `submit()` was
-  changed to take the year BEFORE the employee row for exactly this reason: with
-  the old order (employee first) a closing and a submission by the same employee
-  could wait for each other and PostgreSQL killed one with "deadlock detected".
-  With one order, no two transactions can wait for each other in a circle.
-
-`approvals.act()` and `cancellations.cancel()` do not take this lock: a closed
-year can never contain a PENDING request (closing is blocked while one exists,
-and submissions into a closed year are refused), and cancelling an APPROVED
-request that touches a closed year is already refused (DECISIONS D-104). A test
-confirms both.
-
-Deliberately NO email: FR-NOT-1 lists six events and the year-end closing is not
-one of them (D-195). The result is not lost — the admin sees it in the closing
-summary, the carry-forward log (GET /leave-years/{id}/carry-forwards) keeps every
-row, and each employee sees their carried days on "My balances". Emailing every
-employee at year end is a separate product decision, not an unfinished task.
-"""
+"""Year-end closing and carry-forward service."""
 
 import datetime
 from decimal import Decimal
@@ -90,12 +51,7 @@ async def _all_years(session: AsyncSession, fresh: bool = False) -> list[LeaveYe
 
 
 async def _pending_request_count(session: AsyncSession, year_id: int) -> int:
-    """Counted through the ALLOCATION rows, not `leave_request.leave_year_id`.
-
-    A cross-year request stores only its start year in `leave_request`, but it
-    holds days in BOTH years. Counting through `leave_request_allocation` finds
-    any request that still owes days to this year, whatever its start year.
-    """
+    """Count pending requests with day allocations in the given leave year."""
     return (
         await session.scalar(
             select(func.count(func.distinct(LeaveRequest.id)))
@@ -140,7 +96,6 @@ async def _next_year_pairs(session: AsyncSession, next_year_id: int | None) -> s
 
 
 def _plan(rows, next_year_pairs, next_year_id) -> dict:
-    """Turn balance rows into the closing plan (pure — no database)."""
     log_rows = []
     to_year_values = []
     totals: dict[int, dict] = {}
@@ -157,7 +112,7 @@ def _plan(rows, next_year_pairs, next_year_id) -> dict:
             continue
         carried, forfeited = split
         if carried == 0 and forfeited == 0:
-            continue  # nothing happened, so there is nothing to log
+            continue
 
         if not employee.is_active:
             skipped_inactive += 1
@@ -251,7 +206,7 @@ async def preview(
     offset: int = 0,
     limit: int = PREVIEW_ROW_LIMIT,
 ) -> dict:
-    """READ-ONLY dry run: what closing this year would do, and what stops it."""
+    """Compute a read-only closing preview with blockers, warnings, and totals."""
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
     year = await session.get(LeaveYear, from_year_id)
     if year is None:
@@ -306,10 +261,7 @@ async def close_year(
     expected_fingerprint: dict | None,
     today: datetime.date | None = None,
 ) -> dict:
-    """Close a leave year and move its remaining days into the next year.
-
-    ONE transaction, all-or-nothing.
-    """
+    """Close a leave year and carry eligible balances forward atomically."""
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
     now = datetime.datetime.now(datetime.timezone.utc)
 
@@ -320,13 +272,10 @@ async def close_year(
         )
     next_year = find_next_year(year, await _all_years(session))
 
-    # EXCLUSIVE lock on both years, ascending id. No employee rows are locked.
     await lock_years_exclusive(
         session, [year.id] + ([next_year.id] if next_year is not None else [])
     )
 
-    # Re-read FRESH under the lock: another transaction may have changed these
-    # rows while we waited for the lock (same trap as Phases 11 and 12).
     year = await session.scalar(
         select(LeaveYear)
         .where(LeaveYear.id == from_year_id)
@@ -406,7 +355,6 @@ async def close_year(
                 for row in to_year_values
             ]
         )
-        # ADD to what is already carried forward; never overwrite it.
         statement = statement.on_conflict_do_update(
             index_elements=["employee_id", "leave_type_id", "leave_year_id"],
             set_={
@@ -423,11 +371,7 @@ async def close_year(
         .values(is_closed=True, closed_at=now, closed_by_id=actor.id)
     )
     if was_active:
-        # TWO statements, in this order. A single multi-row UPDATE cannot
-        # guarantee which row PostgreSQL touches first, so it can briefly hold
-        # two active rows and violate the "only one active year" index — the
-        # audit test caught exactly that. Clearing first leaves a moment with no
-        # active year, which nothing forbids.
+        # Clear existing active flag before activating next_year to satisfy the single-active-year unique index.
         await session.execute(
             update(LeaveYear)
             .where(LeaveYear.is_active.is_(True))
@@ -442,8 +386,6 @@ async def close_year(
     rows_carried = sum(1 for row in log_rows if row["carried_days"] > 0)
     rows_forfeited_only = sum(1 for row in log_rows if row["carried_days"] == 0)
 
-    # ONE audit row for the whole closing (the per-employee detail already lives
-    # in leave_carry_forward, so repeating it here would be a second copy).
     await record(
         session,
         actor.id,
@@ -495,7 +437,7 @@ async def close_year(
 async def reconcile_carry_forward(
     session: AsyncSession, from_year_id: int
 ) -> list[dict]:
-    """READ-ONLY invariant check for one closed year. Empty list = consistent."""
+    """Verify carry-forward and balance invariants for a closed leave year."""
     from app.services.approvals import reconcile_balances
 
     mismatches: list[dict] = []
@@ -529,7 +471,6 @@ async def reconcile_carry_forward(
             row.carried_days
         )
 
-    # A manual CARRIED_FORWARD adjustment also belongs in the to-year total.
     carried_adjustments: dict[tuple[int, int, int], Decimal] = {}
     if to_year_ids:
         for row in (
@@ -569,7 +510,6 @@ async def reconcile_carry_forward(
                 )
         for key, want in carried_by_key.items():
             if want == 0:
-                # A forfeit-only row carries nothing, so no balance row exists.
                 continue
             balance = seen.get(key)
             if balance is None:

@@ -1,8 +1,4 @@
-"""Pure rules for year-end closing and carry-forward (FR-LT-4).
-
-No database, no clock: the caller passes `today` in. Everything here is decided
-from plain values so it can be unit-tested without a database.
-"""
+"""Pure rules for year-end closing and carry-forward."""
 
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -13,8 +9,6 @@ TWO_PLACES = Decimal("0.01")
 
 @dataclass(frozen=True)
 class Blocker:
-    """Something that makes closing impossible right now."""
-
     code: str
     message: str
     http_status: int
@@ -22,8 +16,6 @@ class Blocker:
 
 @dataclass(frozen=True)
 class YearView:
-    """The little bit of a leave year the rules need (real rows duck-type this)."""
-
     id: int
     name: str
     start_date: date
@@ -40,16 +32,12 @@ def _days(value) -> Decimal:
 def compute_carry(
     remaining, max_carry_forward_days, carry_allowed: bool
 ) -> tuple[Decimal, Decimal] | None:
-    """Split what is left at year end into (carried, forfeited).
-
-    Returns **None** when the leave type does not allow carry-forward — in that
-    case no log row is written at all (DECISIONS D-22).
-    """
+    """Split remaining days into (carried, forfeited), or None if carry-forward is disabled."""
     if not carry_allowed:
         return None
 
     left = _days(remaining)
-    if left < 0:  # a remaining balance is never negative
+    if left < 0:
         left = Decimal("0.00")
 
     cap = _days(max_carry_forward_days)
@@ -62,7 +50,6 @@ def compute_carry(
 
 
 def find_next_year(from_year, years) -> object | None:
-    """The ADJACENT year only: it must start the day after this one ends."""
     target = from_year.end_date + timedelta(days=1)
     for year in years:
         if year.id == from_year.id:
@@ -73,7 +60,6 @@ def find_next_year(from_year, years) -> object | None:
 
 
 def find_previous_year(from_year, years) -> object | None:
-    """The ADJACENT previous year: it must end the day before this one starts."""
     target = from_year.start_date - timedelta(days=1)
     for year in years:
         if year.id == from_year.id:
@@ -84,7 +70,6 @@ def find_previous_year(from_year, years) -> object | None:
 
 
 def year_has_ended(today: date, end_date: date) -> bool:
-    """True only once `today` is past the last day of the year."""
     return today > end_date
 
 
@@ -97,7 +82,6 @@ def closing_blockers(
     pending_request_count: int,
     missing_next_year_assignments: int = 0,
 ) -> tuple[list[Blocker], list[str]]:
-    """Return (blockers, warnings). Warnings never stop a closing."""
     blockers: list[Blocker] = []
 
     if year.is_closed:

@@ -100,3 +100,33 @@ def test_can_request_curtailment():
     ok, err = can_request_curtailment("APPROVED", is_curtailable=False)
     assert ok is False
     assert "cannot be reduced further" in err
+
+    # Leave that has not yet started (today < start_date) cannot be curtailed (user cancels instead)
+    ok, err = can_request_curtailment(
+        "APPROVED",
+        start_date=date(2026, 11, 3),
+        end_date=date(2026, 11, 5),
+        today=date(2026, 11, 1),
+    )
+    assert ok is False
+    assert "before the leave has started" in err
+
+    # Active / ongoing leave (start_date <= today <= end_date) can be curtailed
+    ok, err = can_request_curtailment(
+        "APPROVED",
+        start_date=date(2026, 11, 3),
+        end_date=date(2026, 11, 5),
+        today=date(2026, 11, 3),
+    )
+    assert ok is True
+    assert err is None
+
+    # Past leave (today > end_date) cannot be curtailed
+    ok, err = can_request_curtailment(
+        "APPROVED",
+        start_date=date(2026, 8, 10),
+        end_date=date(2026, 8, 17),
+        today=date(2026, 10, 29),
+    )
+    assert ok is False
+    assert "already ended" in err

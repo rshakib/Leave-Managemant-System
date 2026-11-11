@@ -1,9 +1,4 @@
-"""The transactional outbox (DECISIONS D-19).
-
-`enqueue_events` INSERTs rows inside the CALLER's transaction, before its single
-commit. It never renders or sends anything — a mail problem can therefore never
-roll back a leave action, and the worker does the sending later.
-"""
+"""Transactional notification outbox queuing and payload helpers."""
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +11,9 @@ from app.services.email_rules import plan_emails
 async def enqueue_events(
     session: AsyncSession, event, facts: dict
 ) -> int:
-    """Queue the emails for `event`. Idempotent thanks to `dedupe_key`."""
+    if event == "REMINDER" and not settings.enable_approval_reminders:
+        return 0
+
     specs = plan_emails(event, facts)
 
     rows = [
@@ -32,7 +29,7 @@ async def enqueue_events(
             "dedupe_key": spec.dedupe_key,
         }
         for spec in specs
-        if spec.to_emails  # never queue an email with nobody to send it to
+        if spec.to_emails
     ]
     if not rows:
         return 0
@@ -51,7 +48,6 @@ def _text(value) -> str:
 
 
 async def balances_after(session: AsyncSession, request) -> list[dict]:
-    """The remaining available days per leave year, AFTER the change."""
     from sqlalchemy import select
 
     from app.models.leave_balance import LeaveBalance
@@ -103,11 +99,7 @@ async def build_facts(
     balances: list[dict] | None = None,
     extra: dict | None = None,
 ) -> dict:
-    """Collect the facts for a request from the CURRENT (in-memory) state.
-
-    Deliberately no `populate_existing`: the caller has just changed the rows in
-    this session, and we want those changes, not the old database values.
-    """
+    """Collect notification facts from the current session state."""
     from sqlalchemy import select
 
     from app.models.employee import Employee
@@ -136,12 +128,28 @@ async def build_facts(
             ).all()
         }
 
+    supervisor = None
+    if employee and employee.supervisor_id:
+        if employee.supervisor_id in people:
+            supervisor = people[employee.supervisor_id]
+        else:
+            supervisor = await session.get(Employee, employee.supervisor_id)
+
+    supervisor_name = supervisor.full_name if (supervisor and supervisor.is_active) else None
+    supervisor_email = supervisor.email if (supervisor and supervisor.is_active) else None
+    supervisor_id = supervisor.id if (supervisor and supervisor.is_active) else None
+
+    approver_tokens = (extra or {}).get("approver_tokens", {})
     facts = {
         "request_id": request.id,
-        "employee_name": employee.full_name,
-        "employee_email": employee.email,
-        "leave_type_code": leave_type.code,
-        "leave_type_name": leave_type.name,
+        "employee_code": employee.employee_code if employee else "",
+        "employee_name": employee.full_name if employee else "",
+        "employee_email": employee.email if employee else "",
+        "supervisor_id": supervisor_id,
+        "supervisor_name": supervisor_name,
+        "supervisor_email": supervisor_email,
+        "leave_type_code": leave_type.code if leave_type else "",
+        "leave_type_name": leave_type.name if leave_type else "",
         "start_date": str(request.start_date),
         "end_date": str(request.end_date),
         "day_type": _text(request.day_type),
@@ -160,6 +168,7 @@ async def build_facts(
                 "is_active": people[row.approver_id].is_active
                 if row.approver_id in people
                 else False,
+                "token": approver_tokens.get(row.approver_id),
             }
             for row in rows
         ],

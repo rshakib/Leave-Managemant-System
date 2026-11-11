@@ -3,15 +3,6 @@
 Revision ID: 92beb3d954d2
 Revises: ead5bf61ec76
 Create Date: 2026-10-25 17:20:14.984395
-
-Adds the cancellation audit columns to `leave_request` (FR-LR-5) plus the CHECK
-that `cancelled_at` and `cancelled_by_id` are set together.
-
-`final_decided_at` is deliberately NOT touched by a cancellation: it records when
-the APPROVAL decision was reached, which stays true even afterwards.
-
-The CHECK constraint is written by hand because Alembic autogenerate does not
-compare CHECK constraints on existing tables.
 """
 from typing import Sequence, Union
 

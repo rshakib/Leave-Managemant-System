@@ -1,7 +1,4 @@
-"""Pure business rules for early return / leave curtailment.
-
-No database, no network, no side effects — purely deterministic logic.
-"""
+"""Pure rules for early return / leave curtailment."""
 
 from datetime import date
 from decimal import Decimal
@@ -22,12 +19,6 @@ def validate_curtailment_dates(
     original_day_type: str = "FULL_DAY",
     curtailed_day_type: str = "FULL_DAY",
 ) -> None:
-    """Validate that the curtailed end date and day type are valid.
-
-    - Must be on or after start_date.
-    - Must be on or before original_end_date.
-    - If curtailed_end_date == original_end_date, it is ONLY valid if original was FULL_DAY and curtailed is half day (FIRST_HALF or SECOND_HALF).
-    """
     if curtailed_end_date < start_date:
         raise CurtailmentRuleError(
             f"Curtailed end date ({curtailed_end_date}) cannot be before the start date ({start_date}).",
@@ -50,7 +41,6 @@ def calculate_curtailment_refund(
     original_days: Decimal,
     new_days: Decimal,
 ) -> Decimal:
-    """Calculate the number of days to refund to the employee's balance."""
     orig = Decimal(str(original_days))
     new = Decimal(str(new_days))
     if new < 0:
@@ -71,8 +61,11 @@ def can_request_curtailment(
     touches_closed_year: bool = False,
     has_pending_curtailment: bool = False,
     is_curtailable: bool = True,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    today: date | None = None,
 ) -> tuple[bool, Optional[str]]:
-    """Determine whether an employee can submit an early return request."""
     if request_status != "APPROVED":
         return False, f"Only approved requests can be curtailed (status is {request_status})."
     if touches_closed_year:
@@ -81,4 +74,10 @@ def can_request_curtailment(
         return False, "An early return request is already pending decision for this leave request."
     if not is_curtailable:
         return False, "This leave request cannot be reduced further (already a half day)."
+    if start_date is not None and today is not None:
+        if today < start_date:
+            return False, "Cannot submit an early return before the leave has started. You can cancel the request instead."
+    if end_date is not None and today is not None:
+        if today > end_date:
+            return False, "Cannot curtail a leave request that has already ended."
     return True, None

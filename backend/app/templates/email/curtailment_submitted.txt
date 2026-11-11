@@ -1,0 +1,17 @@
+Hello{{ ' ' + approver_name if approver_name else '' }},
+
+{{ employee_name }} has requested an early return (leave curtailment).
+
+  Leave type       : {{ leave_type_name }} ({{ leave_type_code }})
+  Original dates   : {{ start_date }} to {{ original_end_date }}
+  New return date  : {{ curtailed_end_date }} ({{ curtailed_day_type }})
+  Days to refund   : {{ days_to_refund }} days
+  New total leave  : {{ new_days }} days (originally {{ original_days }} days)
+  Reason           : {{ reason_short }}
+
+To review and decide on this early return request:
+{{ link }}
+
+You are receiving this because you are an approver for {{ employee_name }}.
+-- Leave Management System
+

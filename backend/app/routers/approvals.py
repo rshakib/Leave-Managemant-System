@@ -10,6 +10,7 @@ from sqlmodel import SQLModel
 
 from app.core.deps import require_roles
 from app.db.session import get_session
+from app.models.auth_tokens import ApprovalActionToken
 from app.models.employee import Employee, Role
 from app.models.leave_request import (
     ApprovalStatus,
@@ -23,6 +24,8 @@ from app.models.leave_request import (
 from app.models.leave_type import LeaveType
 from app.services.approval_rules import Action
 from app.services.approvals import act, pending_approval_count
+from app.services.curtailments import count_inbox_curtailments
+from app.services.security_rules import hash_token
 
 router = APIRouter(tags=["approvals"])
 
@@ -86,7 +89,13 @@ async def inbox_count(
     current: Employee = Depends(require_roles(Role.APPROVER)),
     session: AsyncSession = Depends(get_session),
 ) -> InboxCount:
-    return InboxCount(pending=await pending_approval_count(session, current.id))
+    pending_leaves = await pending_approval_count(session, current.id)
+    pending_curtailments = await count_inbox_curtailments(session, current)
+    return InboxCount(
+        pending=pending_leaves,
+        early_returns=pending_curtailments,
+        total=pending_leaves + pending_curtailments,
+    )
 
 
 @router.get("/approvals/inbox", response_model=list[InboxItem])
@@ -97,11 +106,6 @@ async def inbox(
     current: Employee = Depends(require_roles(Role.APPROVER)),
     session: AsyncSession = Depends(get_session),
 ) -> list[InboxItem]:
-    """Only the caller's own approval rows — there is no user id parameter.
-
-    Four queries in total (approvals+requests, employees, leave types, the
-    other-approver counts) regardless of how many rows come back.
-    """
     statement = (
         select(LeaveRequestApproval, LeaveRequest)
         .join(LeaveRequest, LeaveRequest.id == LeaveRequestApproval.leave_request_id)
@@ -129,7 +133,6 @@ async def inbox(
 
     request_ids = {request.id for _, request in rows}
 
-    # Query 2: the employees who asked.
     employees = {
         employee.id: employee
         for employee in (
@@ -140,7 +143,6 @@ async def inbox(
             )
         ).all()
     }
-    # Query 3: the leave types.
     leave_types = {
         leave_type.id: leave_type
         for leave_type in (
@@ -151,7 +153,6 @@ async def inbox(
             )
         ).all()
     }
-    # Query 4: every approval on those requests, for the "n of m" summary.
     all_approvals = (
         await session.execute(
             select(
@@ -194,3 +195,272 @@ async def inbox(
             )
         )
     return items
+
+
+class QuickApprovalVerifyOut(SQLModel):
+    request_id: int
+    employee_name: str
+    employee_code: str
+    leave_type_name: str
+    leave_type_code: str
+    start_date: datetime.date
+    end_date: datetime.date
+    day_type: str
+    chargeable_days: Decimal
+    reason: str
+    approver_name: str
+    suggested_action: str
+    request_status: str
+    approval_status: str
+
+
+class QuickApprovalDecideIn(SQLModel):
+    token: str
+    action: Action = Action.APPROVE
+    comment: str | None = Field(default=None, max_length=1000)
+
+
+class QuickApprovalDecideOut(SQLModel):
+    ok: bool = True
+    message: str
+    request_id: int
+    status: RequestStatus
+    already_decided: bool = False
+    employee_name: str | None = None
+    leave_type_name: str | None = None
+    start_date: datetime.date | None = None
+    end_date: datetime.date | None = None
+    chargeable_days: Decimal | None = None
+
+
+@router.get("/approvals/quick-verify", response_model=QuickApprovalVerifyOut)
+async def quick_verify(
+    token: str,
+    action: str = "APPROVE",
+    session: AsyncSession = Depends(get_session),
+) -> QuickApprovalVerifyOut:
+    token_str = (token or "").strip()
+    if not token_str:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Token is required.")
+    token_hash = hash_token(token_str)
+    token_record = await session.scalar(
+        select(ApprovalActionToken).where(ApprovalActionToken.token_hash == token_hash)
+    )
+    if token_record is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invalid approval token.")
+
+    approval = await session.get(LeaveRequestApproval, token_record.approval_id)
+    if approval is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Approval record not found.")
+
+    leave_req = await session.get(LeaveRequest, approval.leave_request_id)
+    if leave_req is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Leave request not found.")
+
+    if approval.status in (ApprovalStatus.APPROVED, ApprovalStatus.REJECTED) or (
+        leave_req and leave_req.status in (RequestStatus.APPROVED, RequestStatus.REJECTED)
+    ):
+        employee = await session.get(Employee, leave_req.employee_id)
+        approver = await session.get(Employee, approval.approver_id)
+        leave_type = await session.get(LeaveType, leave_req.leave_type_id)
+        return QuickApprovalVerifyOut(
+            request_id=leave_req.id,
+            employee_name=employee.full_name if employee else "",
+            employee_code=employee.employee_code if employee else "",
+            leave_type_name=leave_type.name if leave_type else "",
+            leave_type_code=leave_type.code if leave_type else "",
+            start_date=leave_req.start_date,
+            end_date=leave_req.end_date,
+            day_type=leave_req.day_type,
+            chargeable_days=leave_req.chargeable_days,
+            reason=leave_req.reason,
+            approver_name=approver.full_name if approver else "",
+            suggested_action=action.upper() if action in ("APPROVE", "REJECT") else "APPROVE",
+            request_status=leave_req.status,
+            approval_status=approval.status,
+        )
+
+    if token_record.used_at is not None:
+        raise HTTPException(
+            status.HTTP_410_GONE, "This approval link has already been used."
+        )
+
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    if token_record.expires_at < now_utc:
+        raise HTTPException(
+            status.HTTP_410_GONE, "This approval link has expired."
+        )
+
+    if approval.status != ApprovalStatus.PENDING:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"You have already {approval.status.lower()} this request.",
+        )
+
+    if leave_req.status != RequestStatus.PENDING:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"This leave request is already {leave_req.status.lower()}.",
+        )
+
+    employee = await session.get(Employee, leave_req.employee_id)
+    approver = await session.get(Employee, approval.approver_id)
+    leave_type = await session.get(LeaveType, leave_req.leave_type_id)
+
+    suggested = action.upper() if action and action.upper() in ("APPROVE", "REJECT") else token_record.action
+
+    return QuickApprovalVerifyOut(
+        request_id=leave_req.id,
+        employee_name=employee.full_name if employee else "",
+        employee_code=employee.employee_code if employee else "",
+        leave_type_name=leave_type.name if leave_type else "",
+        leave_type_code=leave_type.code if leave_type else "",
+        start_date=leave_req.start_date,
+        end_date=leave_req.end_date,
+        day_type=leave_req.day_type,
+        chargeable_days=leave_req.chargeable_days,
+        reason=leave_req.reason,
+        approver_name=approver.full_name if approver else "",
+        suggested_action=suggested,
+        request_status=leave_req.status,
+        approval_status=approval.status,
+    )
+
+
+@router.post("/approvals/quick-decide", response_model=QuickApprovalDecideOut)
+async def quick_decide(
+    payload: QuickApprovalDecideIn,
+    session: AsyncSession = Depends(get_session),
+) -> QuickApprovalDecideOut:
+    token_str = (payload.token or "").strip()
+    if not token_str:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Token is required.")
+    token_hash = hash_token(token_str)
+    token_record = await session.scalar(
+        select(ApprovalActionToken).where(ApprovalActionToken.token_hash == token_hash)
+    )
+    if token_record is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invalid approval token.")
+
+    approval = await session.get(LeaveRequestApproval, token_record.approval_id)
+    if approval is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Approval record not found.")
+
+    leave_req = await session.get(LeaveRequest, approval.leave_request_id)
+
+    if approval.status == ApprovalStatus.APPROVED or (leave_req and leave_req.status == RequestStatus.APPROVED):
+        emp = await session.get(Employee, leave_req.employee_id) if leave_req else None
+        lt = await session.get(LeaveType, leave_req.leave_type_id) if leave_req else None
+        return QuickApprovalDecideOut(
+            ok=True,
+            message=f"Leave request for {emp.full_name if emp else 'employee'} has already been approved.",
+            request_id=leave_req.id if leave_req else approval.leave_request_id,
+            status=RequestStatus.APPROVED,
+            already_decided=True,
+            employee_name=emp.full_name if emp else None,
+            leave_type_name=lt.name if lt else None,
+            start_date=leave_req.start_date if leave_req else None,
+            end_date=leave_req.end_date if leave_req else None,
+            chargeable_days=leave_req.chargeable_days if leave_req else None,
+        )
+
+    if approval.status == ApprovalStatus.REJECTED or (leave_req and leave_req.status == RequestStatus.REJECTED):
+        emp = await session.get(Employee, leave_req.employee_id) if leave_req else None
+        lt = await session.get(LeaveType, leave_req.leave_type_id) if leave_req else None
+        return QuickApprovalDecideOut(
+            ok=True,
+            message=f"Leave request for {emp.full_name if emp else 'employee'} has already been rejected.",
+            request_id=leave_req.id if leave_req else approval.leave_request_id,
+            status=RequestStatus.REJECTED,
+            already_decided=True,
+            employee_name=emp.full_name if emp else None,
+            leave_type_name=lt.name if lt else None,
+            start_date=leave_req.start_date if leave_req else None,
+            end_date=leave_req.end_date if leave_req else None,
+            chargeable_days=leave_req.chargeable_days if leave_req else None,
+        )
+
+    if token_record.used_at is not None:
+        raise HTTPException(
+            status.HTTP_410_GONE, "This approval link has already been used."
+        )
+
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    if token_record.expires_at < now_utc:
+        raise HTTPException(
+            status.HTTP_410_GONE, "This approval link has expired."
+        )
+
+    approver = await session.get(Employee, approval.approver_id)
+    if approver is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Approver not found.")
+
+    comment = (payload.comment or "").strip() or None
+    if payload.action == Action.REJECT:
+        if not comment or len(comment) < 3:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "The rejection reason must be 3..1000 characters.",
+            )
+
+    try:
+        leave_req = await act(
+            session,
+            approval.leave_request_id,
+            approver,
+            payload.action,
+            comment or "Decided via email magic link",
+        )
+    except HTTPException as exc:
+        if exc.status_code == 409 and "already approved" in str(exc.detail).lower():
+            emp = await session.get(Employee, leave_req.employee_id) if leave_req else None
+            lt = await session.get(LeaveType, leave_req.leave_type_id) if leave_req else None
+            return QuickApprovalDecideOut(
+                ok=True,
+                message=f"Leave request for {emp.full_name if emp else 'employee'} has already been approved.",
+                request_id=approval.leave_request_id,
+                status=RequestStatus.APPROVED,
+                already_decided=True,
+                employee_name=emp.full_name if emp else None,
+                leave_type_name=lt.name if lt else None,
+                start_date=leave_req.start_date if leave_req else None,
+                end_date=leave_req.end_date if leave_req else None,
+                chargeable_days=leave_req.chargeable_days if leave_req else None,
+            )
+        if exc.status_code == 409 and "already rejected" in str(exc.detail).lower():
+            emp = await session.get(Employee, leave_req.employee_id) if leave_req else None
+            lt = await session.get(LeaveType, leave_req.leave_type_id) if leave_req else None
+            return QuickApprovalDecideOut(
+                ok=True,
+                message=f"Leave request for {emp.full_name if emp else 'employee'} has already been rejected.",
+                request_id=approval.leave_request_id,
+                status=RequestStatus.REJECTED,
+                already_decided=True,
+                employee_name=emp.full_name if emp else None,
+                leave_type_name=lt.name if lt else None,
+                start_date=leave_req.start_date if leave_req else None,
+                end_date=leave_req.end_date if leave_req else None,
+                chargeable_days=leave_req.chargeable_days if leave_req else None,
+            )
+        raise
+
+    token_record.used_at = now_utc
+    session.add(token_record)
+    await session.commit()
+
+    emp = await session.get(Employee, leave_req.employee_id) if leave_req else None
+    lt = await session.get(LeaveType, leave_req.leave_type_id) if leave_req else None
+    action_word = "approved" if payload.action == Action.APPROVE else "declined"
+    name_str = f" for {emp.full_name}" if emp else ""
+    return QuickApprovalDecideOut(
+        ok=True,
+        message=f"Leave request{name_str} has been {action_word} successfully.",
+        request_id=leave_req.id,
+        status=RequestStatus(leave_req.status),
+        already_decided=False,
+        employee_name=emp.full_name if emp else None,
+        leave_type_name=lt.name if lt else None,
+        start_date=leave_req.start_date if leave_req else None,
+        end_date=leave_req.end_date if leave_req else None,
+        chargeable_days=leave_req.chargeable_days if leave_req else None,
+    )

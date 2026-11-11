@@ -1,8 +1,4 @@
-"""Render an outbox payload into subject + plain text + HTML.
-
-Jinja2 autoescape is ON for `.html` templates and OFF for `.txt`, so user input
-(reason, names) is escaped exactly where it matters.
-"""
+"""Render notification payloads into email subject, plain-text, and HTML bodies."""
 
 from pathlib import Path
 
@@ -10,9 +6,13 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.services.email_rules import (
     APPROVED,
+    APPROVED_SUPERVISOR,
     APPROVER_ACTED,
     CANCELLED,
     CANCELLED_EMPLOYEE,
+    CURTAILMENT_APPROVED,
+    CURTAILMENT_REJECTED,
+    CURTAILMENT_SUBMITTED,
     PASSWORD_RESET,
     REJECTED,
     REMINDER,
@@ -35,11 +35,15 @@ SUBJECTS = {
     SUBMITTED: "Leave request from {employee_name} ({leave_type_code})",
     APPROVER_ACTED: "{actor_name} approved a leave request ({employee_name})",
     APPROVED: "Leave request approved ({employee_name})",
+    APPROVED_SUPERVISOR: "Leave request approved for {employee_name} ({leave_type_code})",
     REJECTED: "Leave request rejected ({employee_name})",
     CANCELLED: "Leave request cancelled ({employee_name})",
     CANCELLED_EMPLOYEE: "Your leave request was cancelled by an administrator",
     REMINDER: "Reminder: {count} leave request(s) waiting for your decision",
     PASSWORD_RESET: "Reset your Leave Management password",
+    CURTAILMENT_SUBMITTED: "Early return request from {employee_name} ({leave_type_code})",
+    CURTAILMENT_APPROVED: "Early return request approved ({employee_name})",
+    CURTAILMENT_REJECTED: "Early return request rejected ({employee_name})",
 }
 
 
@@ -50,10 +54,12 @@ def shorten(value, limit: int = MAX_REASON) -> str:
 
 def _link(event_type: str, payload: dict, base_url: str) -> str:
     base = (base_url or "").rstrip("/")
-    if event_type == REMINDER:
+    if event_type == REMINDER or event_type == CURTAILMENT_SUBMITTED:
         return f"{base}/approvals"
     if event_type == PASSWORD_RESET:
         return f"{base}/reset-password?token={payload.get('token')}"
+    if event_type == SUBMITTED and payload.get("token"):
+        return f"{base}/quick-approval?token={payload.get('token')}&action=APPROVE"
     return f"{base}/leave-requests/{payload.get('request_id')}"
 
 
@@ -70,25 +76,30 @@ def _subject(event_type: str, context: dict) -> str:
 def render_preview(
     event_type: str, payload: dict | None, base_url: str
 ) -> tuple[str | None, str | None, str | None]:
-    """Render for the administrator's preview screen — NEVER raises.
-
-    An extra or unexpected row must not turn `GET /admin/emails/{id}` into a 500,
-    so anything we cannot render comes back as (None, None, None).
-    """
+    """Render an email payload for admin preview, returning (None, None, None) on error."""
     try:
         return render_email(event_type, payload or {}, base_url)
-    except Exception:  # noqa: BLE001 - a preview is never worth a 500
+    except Exception:  # noqa: BLE001
         return None, None, None
 
 
 def render_email(
     event_type: str, payload: dict, base_url: str
 ) -> tuple[str, str, str]:
-    """Return (subject, text_body, html_body)."""
     if event_type not in SUBJECTS:
         raise ValueError(f"Unknown email event '{event_type}'.")
 
     context = dict(payload)
+    base = (base_url or "").rstrip("/")
+    token = payload.get("token")
+    if token:
+        context["quick_approve_link"] = f"{base}/quick-approval?token={token}&action=APPROVE"
+        context["quick_reject_link"] = f"{base}/quick-approval?token={token}&action=REJECT"
+    else:
+        fallback = f"{base}/leave-requests/{payload.get('request_id')}"
+        context["quick_approve_link"] = fallback
+        context["quick_reject_link"] = fallback
+    context["app_link"] = f"{base}/leave-requests/{payload.get('request_id')}"
     context["reason_short"] = shorten(payload.get("reason"))
     context["link"] = _link(event_type, payload, base_url)
     context["base_url"] = base_url

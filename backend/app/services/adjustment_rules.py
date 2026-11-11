@@ -1,17 +1,4 @@
-"""Pure rules for a manual leave-balance adjustment (NFR-1).
-
-An adjustment is a small, deliberate correction ("+5 days, because…") that an
-administrator makes by hand. Only three of the four stored numbers can be
-adjusted:
-
-* ALLOCATED        — the entitlement for the year
-* CARRIED_FORWARD  — days brought in from the previous year
-* USED             — days already taken
-
-PENDING is deliberately NOT adjustable: it belongs to the requests that are
-waiting for approval, so the only honest way to change it is to approve, reject
-or cancel a request. See DECISIONS D-155.
-"""
+"""Pure rules for manual leave-balance adjustments."""
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -25,7 +12,6 @@ MAX_REASON_LENGTH = 500
 
 
 class AdjustmentError(ValueError):
-    """A refused adjustment, with the HTTP status the API should answer with."""
 
     def __init__(self, code: str, message: str, http_status: int) -> None:
         super().__init__(message)
@@ -52,7 +38,6 @@ def _money(value) -> Decimal:
 
 
 def available_of(allocated, carried_forward, used, pending) -> Decimal:
-    """allocated + carried_forward - used - pending (the computed balance)."""
     return (
         _money(allocated)
         + _money(carried_forward)
@@ -101,7 +86,6 @@ def _delta(value) -> Decimal:
 
 
 def apply_adjustment(balance, field, delta) -> AdjustmentResult:
-    """Apply `delta` to one field of `balance` (a row with the four numbers)."""
     name = normalise_field(field)
     change = _delta(delta)
 
@@ -150,7 +134,6 @@ def apply_adjustment(balance, field, delta) -> AdjustmentResult:
 
 
 def validate_reason(text) -> str:
-    """Trim, then enforce 5..500 characters and no control characters."""
     cleaned = (text or "").strip() if isinstance(text, str) else ""
     if len(cleaned) < MIN_REASON_LENGTH:
         raise AdjustmentError(
@@ -177,10 +160,8 @@ def validate_reason(text) -> str:
 
 
 def expected_used(approved_days_sum, used_adjustments_sum) -> Decimal:
-    """used should equal approved request days PLUS 'used' adjustments."""
     return _money(approved_days_sum) + _money(used_adjustments_sum)
 
 
 def expected_carried_forward(carry_log_sum, carried_adjustments_sum) -> Decimal:
-    """carried_forward should equal the carry log PLUS carried adjustments."""
     return _money(carry_log_sum) + _money(carried_adjustments_sum)

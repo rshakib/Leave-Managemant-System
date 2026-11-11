@@ -1,8 +1,4 @@
-"""Leave-request rules: one `evaluate` used by BOTH the preview and the submit.
-
-Keeping a single read-only evaluator means `/leave-requests/check` and
-`POST /leave-requests` can never disagree about what is allowed.
-"""
+"""Leave request evaluation and submission service."""
 
 import datetime
 from decimal import Decimal
@@ -74,11 +70,7 @@ async def evaluate(
     day_type: DayType,
     has_attachment: bool,
 ) -> LeaveRequestCheck:
-    """Check everything (FR-LR-2) and return the days, split, balances, problems.
-
-    Read-only: it never writes. The chargeable days are computed here, never
-    taken from the client.
-    """
+    """Validate a leave request and return day splits, balance impacts, and any problems."""
     problems: list[CheckProblem] = []
     check = LeaveRequestCheck(
         employee_id=employee.id,
@@ -89,7 +81,6 @@ async def evaluate(
         chargeable_days=Decimal("0"),
     )
 
-    # 1. Day preview (this also validates the dates and the half-day shape).
     try:
         preview = await build_preview(
             session, employee, start_date, end_date, day_type
@@ -102,7 +93,6 @@ async def evaluate(
     check.days = preview.days
     check.chargeable_days = preview.chargeable_days
 
-    # 2. Leave type + leave years.
     leave_type = await session.get(LeaveType, leave_type_id)
     if leave_type is None:
         check.problems = [_problem("leave_type_not_found", "Leave type not found.", 400)]
@@ -207,7 +197,6 @@ async def evaluate(
                 )
             )
 
-    # 3. At least one chargeable day.
     if check.chargeable_days <= 0:
         problems.append(
             _problem(
@@ -218,7 +207,6 @@ async def evaluate(
             )
         )
 
-    # 4. Overlap with the employee's PENDING or APPROVED requests (D-09).
     new_range = RequestRange(start_date, end_date, day_type)
     existing = (
         await session.scalars(
@@ -242,7 +230,6 @@ async def evaluate(
             )
             break
 
-    # 5. At least one active approver.
     approvers = await active_approvers(session, employee.id)
     if not approvers:
         problems.append(
@@ -253,8 +240,6 @@ async def evaluate(
                 400,
             )
         )
-
-    # 6. Attachment rule: Disabled (attachments are not required).
 
     check.problems = problems
     check.can_submit = not problems
@@ -271,13 +256,7 @@ async def submit(
     reason: str,
     attachment_url: str | None,
 ) -> LeaveRequest:
-    """Create the request + allocations + approval rows and reserve the balance.
-
-    Everything happens in ONE transaction, under row locks, so two submissions
-    by the same employee cannot both pass the balance check.
-    """
-    # (a) Find the leave years this range touches (a plain read; the dates are
-    #     inputs, so this cannot change while we work).
+    """Create a pending leave request with allocations, approval rows, and reserved balances."""
     probe = await evaluate(
         session,
         employee,
@@ -289,18 +268,13 @@ async def submit(
     )
     year_ids = sorted({balance.leave_year_id for balance in probe.balances})
 
-    # (b) THE GLOBAL LOCK ORDER IS: leave years -> employee row -> balance rows.
-    #     The year is the gate (Phase 15), and the closing takes the same order
-    #     (it locks the year, then a referencing employee row through the foreign
-    #     key), so no two transactions can wait for each other in a circle.
+    # Lock order: leave years (SHARED) -> employee row -> balance rows.
     assert_years_open(await lock_years_shared(session, year_ids))
 
-    # (c) Lock this employee's row: one submission at a time per employee.
     await session.execute(
         select(Employee.id).where(Employee.id == employee.id).with_for_update()
     )
 
-    # (d) Lock the balance rows in a FIXED order (by leave year) to avoid deadlocks.
     locked_balances: dict[int, LeaveBalance] = {}
     if year_ids:
         rows = (
@@ -317,7 +291,6 @@ async def submit(
         ).all()
         locked_balances = {row.leave_year_id: row for row in rows}
 
-    # (e) Re-check everything now that we hold the locks.
     check = await evaluate(
         session,
         employee,
@@ -351,7 +324,7 @@ async def submit(
         status=RequestStatus.PENDING,
     )
     session.add(request)
-    await session.flush()  # assigns request.id
+    await session.flush()
 
     for split in check.per_year:
         if split.days > 0:
@@ -363,29 +336,53 @@ async def submit(
                 )
             )
 
-    # Snapshot of the approvers AT THIS MOMENT (D-79 style).
     approvers = await active_approvers(session, employee.id)
+    approval_rows: list[LeaveRequestApproval] = []
     for approver in approvers:
-        session.add(
-            LeaveRequestApproval(
-                leave_request_id=request.id,
-                approver_id=approver.id,
-                status=ApprovalStatus.PENDING,
-            )
+        approval_row = LeaveRequestApproval(
+            leave_request_id=request.id,
+            approver_id=approver.id,
+            status=ApprovalStatus.PENDING,
         )
+        session.add(approval_row)
+        approval_rows.append(approval_row)
 
     before_balances = balance_snapshot(locked_balances)
     for balance_read in check.balances:
         if balance_read.days > 0:
             locked_balances[balance_read.leave_year_id].pending += balance_read.days
 
-    # Queue the "submitted" emails INSIDE this transaction (D-19).
     await session.flush()
-    await enqueue_events(
+
+    import secrets
+    from app.models.auth_tokens import ApprovalActionToken
+    from app.services.security_rules import hash_token
+
+    approver_tokens: dict[int, str] = {}
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    expires_at = now_utc + datetime.timedelta(days=14)
+    for row in approval_rows:
+        if row.id is not None:
+            raw_token = secrets.token_urlsafe(32)
+            session.add(
+                ApprovalActionToken(
+                    approval_id=row.id,
+                    token_hash=hash_token(raw_token),
+                    action="APPROVE",
+                    expires_at=expires_at,
+                )
+            )
+            approver_tokens[row.approver_id] = raw_token
+
+    facts = await build_facts(
         session,
-        "SUBMITTED",
-        await build_facts(session, request, extra={"actor_email": employee.email}),
+        request,
+        extra={
+            "actor_email": employee.email,
+            "approver_tokens": approver_tokens,
+        },
     )
+    await enqueue_events(session, "SUBMITTED", facts)
 
     await record(
         session,

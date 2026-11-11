@@ -1,10 +1,4 @@
-"""Seed SOLshare's divisions and departments (idempotent: matched by name).
-
-    ./venv/bin/python -m app.cli.seed_org
-
-Names follow SOLshare's public business lines (SOLbazaar, mobility, SOLroof,
-technology) plus the usual corporate functions. Rename them freely in the UI.
-"""
+"""Seed SOLshare divisions and departments (``python -m app.cli.seed_org``)."""
 
 import asyncio
 import sys

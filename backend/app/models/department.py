@@ -5,11 +5,8 @@ from app.models.base import BaseModel
 
 
 class Department(BaseModel, SQLModel, table=True):
-    """A department inside a division. Named `department` in the database."""
-
     __tablename__ = "department"
     __table_args__ = (
-        # Department names must be unique *within* their division (FR-ORG-2).
         UniqueConstraint("division_id", "name", name="uq_department_division_name"),
     )
 
@@ -20,9 +17,6 @@ class Department(BaseModel, SQLModel, table=True):
         default=True,
         sa_column=Column(Boolean, nullable=False, server_default=text("true")),
     )
-
-
-# --- Pydantic-only models (never a database table) -------------------------
 
 
 class DepartmentCreate(SQLModel):

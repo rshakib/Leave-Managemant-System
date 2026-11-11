@@ -19,8 +19,6 @@ class LoginAttemptRead(SQLModel):
     id: int
     created_at: datetime.datetime
     email_normalized: str
-    # Only the first 8 characters of the HMAC: enough to correlate, useless to
-    # reverse. No raw IP address exists anywhere in the system.
     ip_hash: str
     success: bool
 

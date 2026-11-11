@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Badge, Button, Col, Form, Modal, Row, Spinner, Table } from 'react-bootstrap'
 
 import api, { errorMessage } from '../api/client'
@@ -76,6 +76,7 @@ export default function EmployeesPage() {
   const [supervisors, setSupervisors] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [modalError, setModalError] = useState('')
   const [busyId, setBusyId] = useState(null)
 
   const [filterDivision, setFilterDivision] = useState('')
@@ -146,6 +147,24 @@ export default function EmployeesPage() {
   const departmentName = (id) =>
     departments.find((department) => department.id === id)?.name ?? `#${id}`
 
+  // Prevent circular reporting chains: an employee cannot select themselves
+  // or any of their direct or indirect subordinates as their supervisor.
+  const invalidSupervisorIds = useMemo(() => {
+    if (!editing?.id) return new Set()
+    const invalid = new Set([editing.id])
+    const queue = [editing.id]
+    while (queue.length > 0) {
+      const current = queue.shift()
+      for (const emp of employees) {
+        if (emp.supervisor_id === current && !invalid.has(emp.id)) {
+          invalid.add(emp.id)
+          queue.push(emp.id)
+        }
+      }
+    }
+    return invalid
+  }, [editing, employees])
+
   const openCreate = async () => {
     setForm({
       ...EMPTY_FORM,
@@ -153,6 +172,7 @@ export default function EmployeesPage() {
       department_id: filterDepartment,
     })
     setError('')
+    setModalError('')
     await loadSupervisors()
     setShowCreate(true)
   }
@@ -161,6 +181,7 @@ export default function EmployeesPage() {
     setEditing(employee)
     setForm(toForm(employee))
     setError('')
+    setModalError('')
     await loadSupervisors()
     setShowEdit(true)
   }
@@ -168,6 +189,8 @@ export default function EmployeesPage() {
   const save = async (event, isEdit) => {
     event.preventDefault()
     setSaving(true)
+    setError('')
+    setModalError('')
     try {
       if (isEdit) {
         await api.patch(`/employees/${editing.id}`, toPayload(form, true))
@@ -178,12 +201,11 @@ export default function EmployeesPage() {
       }
       await loadEmployees()
     } catch (err) {
-      setError(
-        errorMessage(
-          err,
-          isEdit ? 'Could not update the employee.' : 'Could not create the employee.',
-        ),
+      const msg = errorMessage(
+        err,
+        isEdit ? 'Could not update the employee.' : 'Could not create the employee.',
       )
+      setModalError(msg)
     } finally {
       setSaving(false)
     }
@@ -324,13 +346,18 @@ export default function EmployeesPage() {
               <option value="">No supervisor</option>
               <NoOptions when={supervisors.length === 0} label="No other active employees" />
               {supervisors
-                .filter((person) => !isEdit || person.id !== editing?.id)
+                .filter((person) => !invalidSupervisorIds.has(person.id))
                 .map((person) => (
                   <option key={person.id} value={person.id}>
                     {person.full_name} ({person.employee_code})
                   </option>
                 ))}
             </Form.Select>
+            {isEdit && invalidSupervisorIds.size > 1 && (
+              <Form.Text className="text-muted small">
+                Subordinates cannot be selected (prevents circular loops).
+              </Form.Text>
+            )}
           </Form.Group>
         </Col>
 
@@ -542,7 +569,14 @@ export default function EmployeesPage() {
           <Modal.Header closeButton>
             <Modal.Title>Add employee</Modal.Title>
           </Modal.Header>
-          <Modal.Body>{renderForm(false)}</Modal.Body>
+          <Modal.Body>
+            {modalError && (
+              <Alert variant="danger" dismissible onClose={() => setModalError('')} className="mb-3">
+                {modalError}
+              </Alert>
+            )}
+            {renderForm(false)}
+          </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShowCreate(false)}>
               Cancel
@@ -559,7 +593,14 @@ export default function EmployeesPage() {
           <Modal.Header closeButton>
             <Modal.Title>Edit employee</Modal.Title>
           </Modal.Header>
-          <Modal.Body>{renderForm(true)}</Modal.Body>
+          <Modal.Body>
+            {modalError && (
+              <Alert variant="danger" dismissible onClose={() => setModalError('')} className="mb-3">
+                {modalError}
+              </Alert>
+            )}
+            {renderForm(true)}
+          </Modal.Body>
           <Modal.Footer>
             <Button variant="secondary" onClick={() => setShowEdit(false)}>
               Cancel

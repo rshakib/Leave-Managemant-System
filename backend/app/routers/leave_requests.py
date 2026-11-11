@@ -133,7 +133,6 @@ async def _detail(
         else None
     )
 
-    # Which of this request's leave years are already closed?
     touched_year_ids = {row.leave_year_id for row in allocations}
     closed_year_names = sorted(
         year.name
@@ -147,6 +146,11 @@ async def _detail(
 
     curtailments = await list_curtailments_for_request(session, current, request.id)
     has_pending_curtailment = any(c.status == CurtailmentStatus.PENDING for c in curtailments)
+    import zoneinfo
+    from app.core.config import settings
+
+    today = datetime.datetime.now(zoneinfo.ZoneInfo(settings.org_timezone)).date()
+
     is_owner_or_admin = (request.employee_id == current.id) or (Role.ADMIN in actor_roles)
     is_curtailable = (
         request.start_date < request.end_date
@@ -162,6 +166,7 @@ async def _detail(
         and not bool(closed_year_names)
         and not has_pending_curtailment
         and is_curtailable
+        and request.start_date <= today <= request.end_date
     )
 
     return LeaveRequestDetail(
@@ -176,8 +181,8 @@ async def _detail(
             request.employee_id,
             current.id,
             Role.ADMIN in actor_roles,
-            # A closed leave year can never be cancelled (D-194), so the flag the
-            # UI reads already says so instead of letting the call fail with 409.
+            start_date=request.start_date,
+            today=today,
             touches_closed_year=bool(closed_year_names),
         ),
         cancelled_at=request.cancelled_at,
@@ -216,7 +221,6 @@ async def _detail(
 async def _visible_or_404(
     session: AsyncSession, request_id: int, current: Employee
 ) -> LeaveRequest:
-    """Owner, ADMIN, or an approver assigned to THIS request. Everyone else 404."""
     request = await session.get(LeaveRequest, request_id)
     if request is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Leave request not found.")
@@ -235,12 +239,8 @@ async def _visible_or_404(
         )
     )
     if assigned is None:
-        # 404, not 403: do not reveal that this request exists.
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Leave request not found.")
     return request
-
-
-# NOTE: fixed paths are declared before "/{request_id}" so they are matched first.
 
 
 @router.get("/check", response_model=LeaveRequestCheck)
@@ -253,7 +253,6 @@ async def check_leave_request(
     current: Employee = Depends(require_roles(Role.EMPLOYEE)),
     session: AsyncSession = Depends(get_session),
 ) -> LeaveRequestCheck:
-    """Read-only preview: the same rules the real submit will apply."""
     return await evaluate(
         session, current, leave_type_id, start_date, end_date, day_type, has_attachment
     )
@@ -295,7 +294,6 @@ async def create_leave_request(
             stored,
         )
     except Exception:
-        # The database part failed after the file was written: remove the file.
         if stored is not None:
             storage.delete(stored)
         raise
@@ -353,7 +351,6 @@ async def cancel_leave_request(
     current: Employee = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> DecisionResult:
-    """Any signed-in user may call this; the service applies the rules."""
     request = await cancel_request(session, request_id, current, payload.comment)
     return DecisionResult(request_id=request.id, status=RequestStatus(request.status))
 
@@ -370,7 +367,6 @@ async def list_all_leave_requests(
     offset: int = 0,
     session: AsyncSession = Depends(get_session),
 ) -> list[AdminRequestRow]:
-    """Every request (ADMIN only). Three queries in total, whatever the size."""
     statement = select(LeaveRequest)
     if status_filter is not None:
         statement = statement.where(LeaveRequest.status == status_filter)

@@ -1,0 +1,23 @@
+Hello {{ employee_name }},
+
+Your early return request has been approved by {{ actor_name }}.
+
+  Leave type       : {{ leave_type_name }} ({{ leave_type_code }})
+  New end date     : {{ curtailed_end_date }}
+  Days refunded    : {{ days_to_refund }} days
+  New leave days   : {{ new_days }} days (was {{ original_days }} days)
+{% if decision_note %}
+  Decision note    : {{ decision_note }}
+{% endif %}
+{% if balances %}
+  Remaining balances:
+  {% for b in balances %}
+    - {{ b.leave_year_name }}: {{ b.available }} days
+  {% endfor %}
+{% endif %}
+
+You can view your updated leave request here:
+{{ link }}
+
+-- Leave Management System
+

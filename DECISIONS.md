@@ -1147,3 +1147,120 @@ Format: **what's unclear → suggested resolution.**
   log for ever, and the fictional `DEMO-` employees sit beside the real ones. The safer path for a
   presentation is still a **fresh Supabase project** you delete afterwards — §1.1 of `DEMO_GUIDE.md`
   spells both options out. The integration suite is unaffected and still refuses a Supabase host.
+
+- **D-206 — Submission notification routing & Boss Email Safety Guard.**
+  1. **Submission notification recipients:** When a leave request is submitted (`SUBMITTED`), emails are routed strictly and only to assigned active approvers (`to_emails`). Neither the employee requester nor administrators receive submission notification emails (`cc_emails = ()`).
+  2. **Boss Email Safety Guard:** Live emails are never dispatched to `raton.hosen@solshare.com` or `ishtiaque.ahmed@solshare.com`. Both `app/services/email_rules.py` and `app/services/mailer.py` strictly intercept, drop, and suppress emails targeting these addresses, logging safety warnings and bypassing SMTP entirely if no unblocked recipients remain.
+
+- **D-207 — Past leave requests cannot be cancelled; early return applies only to active ongoing leaves.**
+  1. **Cancellation (`can_cancel`, `decide_cancel`):** A leave request that has already started or passed (`today >= start_date` in the organization timezone) cannot be cancelled by either an employee or an administrator. Once the leave start date arrives, cancellation is blocked with 400 Bad Request (`leave_already_started`), and the UI button (`Cancel request` / `Cancel approved request`) is removed (`can_cancel = False`). Employees can cancel their own pending requests and administrators can cancel pending or approved requests ONLY while `today < start_date`.
+  2. **Curtailment / Early Return (`can_request_curtailment`, `can_curtail`):** An early return / curtailment request can ONLY be submitted once the leave has actually started (`start_date <= today <= end_date` in the organization timezone). Before the leave starts (`today < start_date`), early return is blocked and the button (`Report Early Return` / `Reduce to Half Day`) is hidden (`can_curtail = False`) because the employee can cancel the request instead (D-210). Once the leave concludes (`today > end_date`), early return is likewise blocked.
+
+- **D-208 — One-Click Email Magic Link Approval (`ApprovalActionToken`).**
+  1. **Token Generation:** On leave request submission (`submit()`), a 32-byte cryptographically secure random secret token is generated for each approver row in `leave_request_approval`. Only its SHA-256 hash is persisted in `approval_action_token` with an expiration window (14 days) and `used_at = None`.
+  2. **Personalized Approver Email Notification:** Each assigned active approver receives their own individual email containing their unique action token URL (`/quick-approval?token=...&action=APPROVE`).
+  3. **Anti-Bot Click Protection:** The email link leads to a dedicated public page (`/quick-approval`) that validates the token via `GET /approvals/quick-verify`. Human confirmation is required to trigger `POST /approvals/quick-decide`, protecting against automated enterprise email scanners (Microsoft Defender SafeLinks, Google Workspace link previewers) that auto-click incoming email links.
+  4. **Execution & Replay Defense:** `POST /approvals/quick-decide` validates the token, executes approval/rejection via the standard `act()` service (ensuring identical locking, balance movements, audit trails, and downstream notifications), and sets `used_at = now()`, preventing replays.
+
+- **D-209 — Supervisor Approval Notification (`APPROVED_SUPERVISOR`).**
+  1. **Notification Routing:** When a leave request is approved (`APPROVED`), if the employee has a designated active supervisor (`employee.supervisor_id`) with a valid email address (not in `PROTECTED_RECIPIENT_EMAILS` and not the employee themselves), a dedicated email notification (`APPROVED_SUPERVISOR`) is automatically dispatched to the supervisor (`to_emails = [supervisor_email]`).
+  2. **Dedicated Context & Deduplication:** The supervisor notification explicitly informs them that a subordinate's leave request has been approved ("Leave request approved for {employee_name} ({leave_type_code})") with request details, dates, days, reason, and remaining balance. If the supervisor was also an assigned approver, their address is omitted from the CC list of the employee's `APPROVED` email to prevent duplicate messages.
+  3. **Transactional Delivery:** The event is queued inside the same approval transaction via `email_outbox` with unique dedupe key `approved_supervisor:{request_id}`.
+
+- **D-210 — Employee Self-Cancellation of Approved Future Leave.**
+  1. **Employee Permission:** An employee who requested a leave can cancel their own `APPROVED` leave request as long as the leave start date has not yet arrived (`today < start_date` in the organization timezone).
+  2. **Start-Date Cutoff:** Once `today >= start_date`, cancellation is permanently blocked with 400 Bad Request (`leave_already_started`) for both employees and administrators, and the cancellation button is hidden (`can_cancel = False`). For leaves that have started or completed, the early return / curtailment workflow applies instead.
+  3. **Balance Restoration & Notifications:** Cancelling an approved future request immediately restores the charged days from `used` back to `available` (`BalanceEffect.RESTORE_USED`), sets the request status to `CANCELLED`, records the cancellation timestamp and optional reason, and notifies assigned approvers.
+
+- **D-211 — Supervisor Team Leave Balances View (`/team-balances`).**
+  1. **Supervisor Detection & Navigation:** `GET /auth/me` includes `is_supervisor: bool` (true if the user has active subordinates via `employee.supervisor_id` or active approver assignments in `employee_approver`). When true (or when holding `APPROVER` or `ADMIN` roles), the sidebar exposes **"Team balances"** (`/team-balances`) with icon `users`.
+  2. **Subordinate Balance Endpoint:** `GET /leave-balances/team` returns all leave balances for all active subordinates reporting directly to the signed-in supervisor (`Employee.supervisor_id == current_user.id`) and employees for whom they serve as active approver (`EmployeeApprover.approver_id == current_user.id`).
+  3. **UI Metrics & Presentation:** The page provides supervisors with live team KPI metrics (total subordinates, total available days remaining, used days, and pending approval days), instant search filtering by employee name/code, leave year selection, leave type filtering, and both card-per-employee and tabular views. Remaining/available days are highlighted prominently.
+
+- **D-212 — Supervisor Team Operational Presence & Actionable KPIs (`/leave-balances/team/stats`).**
+  1. **Replaced Misleading Aggregate Metrics:** Aggregate numbers across disparate leave types (such as summing Annual Leave + Maternity Leave + WFH into a combined pool, or cumulative team usage) are unhelpful for day-to-day team management.
+  2. **Operational Supervisor KPIs:** Replaced with 4 actionable operational metrics:
+     - **Team Members:** Count of direct subordinates reporting to the user.
+     - **On Leave Today:** Real-time count of subordinates with active approved leaves spanning current date (`start_date <= today <= end_date`). Clicking opens an event modal detailing who is absent and which leave type.
+     - **Upcoming Leaves (Next 7 Days):** Subordinates with approved leaves starting in the next 7 calendar days (`today < start_date <= today + 7d`). Clicking opens an event modal with employee names, dates, and durations for sprint/coverage planning.
+     - **Pending Approvals:** Real-time count of leave requests awaiting decision. Clicking navigates directly to `/approvals`.
+  3. **In-Card Presence Indicators:** Employee cards on `/team-balances` display badges for team members currently on leave (`🌴 On Leave Today`) or with upcoming leaves (`🗓️ Leave from ...`), giving supervisors immediate operational awareness at a glance.
+
+
+- **D-213 — Approval Reminder Emails Safeguard & Disabling in Demo/Live Environments.**
+  1. **Background:** Unapproved requests that age past the configured working days threshold (`REMINDER_AFTER_WORKING_DAYS`) ordinarily trigger periodic reminder digest emails to designated approvers via `reminder_tick()`. In demo or pre-production testing environments with live SMTP configurations and real organizational recipient emails (e.g., `@solshare.com`), automated reminder ticks can cause unintended email dispatch to executives and employees.
+  2. **Kill Switch & Default Behavior:** Added `settings.enable_approval_reminders: bool = False` (environment variable `ENABLE_APPROVAL_REMINDERS=false`).
+  3. **Multi-Layer Enforcement:**
+     - **Embedded Worker:** `_embedded_worker_loop()` in `app/main.py` skips calling `reminder_tick()` entirely unless `enable_approval_reminders` is true.
+     - **Tick Gating:** `reminder_tick()` in `app/worker.py` immediately logs an informational skip and returns `0` if reminders are disabled.
+     - **Outbox Guard:** `enqueue_events()` in `app/services/notifications.py` drops `REMINDER` events when reminders are disabled.
+     - **Delivery Interceptor:** Even if any `REMINDER` rows exist in `email_outbox`, `_deliver()` in `app/worker.py` suppresses sending them, records them as suppressed, and never attempts SMTP dispatch.
+
+- **D-214 — Supervisors are NOT automatically assigned as approvers (supersedes D-80 & D-151).**
+  1. **Background:** Previously under FR-APR-2 (D-80/D-151), when an employee was created or updated with a supervisor, that supervisor was automatically added into `employee_approver` as an active approver if they held the `APPROVER` role.
+  2. **Requirement Change:** Supervisors must NOT be automatically made approvers of their supervised employees. A supervisor assignment solely represents the reporting hierarchy (used for operational visibility such as `/team-balances` and `APPROVED_SUPERVISOR` courtesy notification).
+  3. **Explicit Manual Assignment:** Leave approvers must always be explicitly and manually assigned by an administrator via the Approvers management interface (`PUT /employees/{id}/approvers`). Creation (`POST /employees`) and updates (`PATCH /employees/{id}`) no longer mutate `employee_approver`.
+
+- **D-215 — Team Leave Balances strictly scoped to direct supervised subordinates (supersedes D-211 item 2).**
+  1. **User Requirement:** On the Team Leave Balances page (`/team-balances`), a supervisor must only see details of employees whom they actually supervise (`Employee.supervisor_id == current_user.id`). Employees for whom the user is merely an assigned leave approver are strictly excluded.
+  2. **Endpoint Refinement (`_get_subordinate_ids`):** In `app/routers/leave_balances.py`, `_get_subordinate_ids()` queries exclusively for active employees where `Employee.supervisor_id == employee.id`. It no longer unions `EmployeeApprover` assignments and no longer falls back to all active employees for admins.
+  3. **Role & Visibility (`/auth/me`):** `is_supervisor` flag in `GET /auth/me` is `True` strictly when the user has at least one active subordinate reporting to them (`Employee.supervisor_id == employee.id`).
+
+- **D-216 — Default Date Filter on Reports Page to the Last 1 Month.**
+  1. **User Requirement:** On the Reports page (`/reports`), both the Balances and History tabs must default the date filter to the last 1 month (`today - 1 month` to `today`), matching the default behavior on All Leave Requests (`/admin/leave-requests`).
+  2. **Implementation:**
+     - `DateFilter.jsx` exports `getLastMonthRange()` and `toIsoDate()`.
+     - `ReportsPage.jsx` initializes `date_from` and `date_to` to the last 1 month range when no date parameters are provided in search params.
+     - If the date filter is cleared or altered from the default, a quick "Reset to last 1 month" action link appears alongside the date inputs, allowing instant reset and reload.
+     - If dates are explicitly cleared, `date_all=true` is tracked in query parameters so the view remains unconstrained until explicitly reset.
+     - Export to CSV respects the default or configured date range.
+
+- **D-217 — Elimination of Disruptive Auto-Refresh Spinners on Analytical, Log, and Balance Pages.**
+  1. **Problem:** An aggressive 15-second timer (`useAutoRefresh`) unconditionally called `setLoading(true)` on `ReportsPage`, `AdminAuditLogPage`, `AdminEmailsPage`, and `TeamBalancesPage`. This unmounted active data tables/cards and flashed full-page loading spinners while users were filtering, reading, or typing in search boxes.
+  2. **Resolution:**
+     - **Reports (`/reports`)**: Auto-refresh removed. Reports are static analytical snapshots that update only when the user changes criteria and clicks "Apply" / "Reset".
+     - **Audit Log (`/admin/audit-log`)**: Auto-refresh removed. Historical audit records update only when the user applies search criteria or paginates.
+     - **Email Log (`/admin/emails`)**: Auto-refresh removed. Added an on-demand "Refresh" button alongside queue processing.
+     - **Team Balances (`/team-balances`)**: Auto-refresh removed. `loading` is isolated strictly to the initial mount (`balances === null`) so any manual reload preserves cards without full-screen flicker. Added an on-demand "Refresh" button beside the Leave Year selector.
+     - **Global Polling Cadence**: Relaxed fallback polling in `useAutoRefresh.js` from 15 seconds to 60 seconds.
+
+- **D-218 — Email Notifications for Early Returns (Curtailments) and Admin Recipient Rules.**
+  1. **Admin Email Clarification:** In Leave Management System, Administrators do **not** receive emails for every leave request by default. Emails for submission (`SUBMITTED`) are sent strictly to the designated approvers for that employee. Admins can view all requests on the web dashboard and "All requests" page. Admins receive emails only when explicitly assigned as an approver or when `NOTIFY_CC_ADMIN_EMAILS` is configured with `NOTIFY_CC_ADMINS_ON_FINAL=True`.
+  2. **Early Return (Curtailment) Email Notifications:**
+     - `CURTAILMENT_SUBMITTED`: When an employee submits an early return on an approved leave, email notifications are enqueued to the employee's active approvers, detailing the requested new return date, days to be refunded back to balance, and reason, with a direct link to the approvals inbox.
+     - `CURTAILMENT_APPROVED`: When an approver or admin approves an early return, an email is sent to the employee (with approvers CC'd) confirming the refunded days and updated balances.
+     - `CURTAILMENT_REJECTED`: When an early return is rejected, an email is sent to the employee with the approver's note explaining why it was rejected.
+     - Boss Safety Guard: Recipient filtering strictly excludes protected testing addresses (`raton.hosen@solshare.com`, `ishtiaque.ahmed@solshare.com`).
+
+- **D-219 — Unified Approvals Badge and Tab Counters including Early Return Requests.**
+  1. **Problem:** When an employee submitted an Early Return (curtailment) request, the sidebar badge on "Approvals" and the dashboard counter "Waiting for me" remained `0`, because `GET /approvals/inbox/count` counted only initial leave requests (`LeaveRequestApproval`). Approvers could only discover early returns by navigating to Approvals and switching to the "Early Returns" tab.
+  2. **Resolution:**
+     - **Backend (`GET /approvals/inbox/count`):** Extended `InboxCount` model with `pending` (leave requests), `early_returns` (pending curtailments), and `total` (`pending + early_returns`). Added `count_inbox_curtailments()` to count pending curtailments for which the actor is an active approver, assigned request approver, or admin.
+     - **Sidebar Badge (`Layout.jsx`):** Sidebar now displays the `total` pending actions count (`data.total`), highlighting any pending early return immediately with the red pill badge.
+     - **Home Dashboard (`HomePage.jsx`):** "Waiting for me" KPI card and the "Approvals" action button count use `data.total`.
+     - **Inbox Tabs (`ApprovalsInboxPage.jsx`):** Added live counter badges directly onto the tabs: `Pending Requests (X)` and `Early Returns (Y)` so approvers immediately see where pending tasks reside.
+
+- **D-220 — Comprehensive Docker Operation Guide in README.**
+  1. **Documentation Expansion:** Expanded `README.md` with complete instructions for starting Docker service, managing container lifecycle (`docker compose up -d`, `down`, `restart`, `down -v`), live logging (`logs -f`), direct psql access (`exec db psql`), Mailpit local email inbox profiles (`--profile mail`), and common troubleshooting (port 5432 conflict resolution, permissions, daemon startup).
+
+- **D-221 — Full-Stack Containerization for Backend & Frontend.**
+  1. **User Requirement:** Provide one-command deployment (`docker compose up -d --build`) that runs the complete application: PostgreSQL database, FastAPI backend, and React frontend.
+  2. **Implementation:**
+     - `backend/Dockerfile`: Python 3.12-slim base, dependency installation, automatic `alembic upgrade head` migration execution on container start, exposing port 8000.
+     - `frontend/Dockerfile` & `nginx.conf`: Multi-stage build with Node 22-alpine for Vite static build and Nginx Alpine for serving frontend static assets and routing Single Page Application routes to `/index.html`.
+     - `docker-compose.yml`: Added `backend` and `frontend` services with network wiring, health check dependencies, and configurable port mappings (`BACKEND_PORT:-8000`, `FRONTEND_PORT:-5173`).
+
+- **D-222 — Containerized Email Outbox Worker Service in Docker Compose.**
+  1. **User Requirement:** Ensure the background worker runs alongside the backend and frontend in Docker so outbox emails, reminders, and daily maintenance tasks are automatically processed without requiring manual CLI invocation.
+  2. **Implementation:**
+     - Added `worker` service (`leave_worker`) in `docker-compose.yml` sharing the `./backend` build context and running `command: ["python", "-m", "app.worker"]`.
+     - Depends on `db` (healthy) and `backend` (started).
+     - Configured `EMBEDDED_EMAIL_WORKER=false` on `leave_backend` so the dedicated worker container cleanly and exclusively handles email dispatch, retry backoff, reminder ticks, and daily table maintenance behind Postgres advisory locks.
+     - Logs can be followed directly via `docker compose logs -f worker`.
+
+- **D-223 — Professional Access Restricted / Switch-Account Flow & Deep-Link Login Redirects.**
+  1. **Problem:** When a user signed into one account opened a URL belonging to another account (such as `/leave-requests/137`, `/approvals`, or an Admin screen), the app displayed a stark red alert (`"Leave request not found."` or `"Not allowed"`) with no signed-in account context and no way to switch accounts and land on the intended page. Additionally, unauthenticated deep links redirected to `/login` without returning to the original path after sign-in.
+  2. **Resolution (preserving D-89 API security):**
+     - **Shared Access Card (`AccessState.jsx`):** Added a centered card showing a friendly, non-technical explanation, who is currently signed in (`full_name` and initials only — email addresses are never exposed), **"Go to Home"** navigation, and **"Switch Account"** action.
+     - **Safe Post-Login Redirects (`redirectUtils.js`, `ProtectedRoute.jsx`, `LoginPage.jsx`):** `ProtectedRoute` and `"Switch Account"` pass a validated internal `?next=` path to `/login` (with `&switch=1` when switching accounts), and `LoginPage` returns the user directly to that destination after signing into the authorized account.
+     - **Consistent Route & Page Coverage (`LeaveRequestDetailPage.jsx`, `ProtectedRoute.jsx`, `App.jsx`):** Applied `AccessState` across role-restricted routes (`ADMIN`, `APPROVER`, `requireSupervisor`) and leave-request `404`/`403` responses without weakening D-89 (`_visible_or_404`) API privacy guarantees.

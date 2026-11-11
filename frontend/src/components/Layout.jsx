@@ -4,8 +4,9 @@ import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react
 
 import api from '../api/client'
 import { useAuth } from '../auth/AuthContext.jsx'
-import Icon from './Icon.jsx'
 import { useAutoRefresh } from '../hooks/useAutoRefresh.js'
+import { getInitials } from '../utils/initials.js'
+import Icon from './Icon.jsx'
 
 // Navigation lives in the sidebar, grouped so it stays readable as the app
 // grows. `roles` limits an entry to the people who can actually open it.
@@ -20,9 +21,10 @@ const SECTIONS = [
     ],
   },
   {
-    title: 'Approvals',
+    title: 'Team & Approvals',
     items: [
       { to: '/approvals', label: 'Approvals', icon: 'check', roles: ['APPROVER'], showCount: true },
+      { to: '/team-balances', label: 'Team balances', icon: 'users', supervisorOnly: true },
     ],
   },
   {
@@ -49,16 +51,6 @@ const SECTIONS = [
   },
 ]
 
-function initials(name) {
-  if (!name) return '?'
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0].toUpperCase())
-    .join('')
-}
-
 export default function Layout() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -72,16 +64,19 @@ export default function Layout() {
   const roleKey = [...(user?.roles ?? [])].sort().join(', ')
   const roles = useMemo(() => (roleKey ? roleKey.split(', ') : []), [roleKey])
   const isApprover = roles.includes('APPROVER')
+  const isSupervisor = Boolean(user?.is_supervisor || roles.includes('ADMIN'))
 
   const sections = useMemo(() => {
     const owned = roleKey ? roleKey.split(', ') : []
     return SECTIONS.map((section) => ({
       ...section,
-      items: section.items.filter(
-        (item) => !item.roles || item.roles.some((role) => owned.includes(role)),
-      ),
+      items: section.items.filter((item) => {
+        if (item.supervisorOnly && !isSupervisor) return false
+        if (item.roles && !item.roles.some((role) => owned.includes(role))) return false
+        return true
+      }),
     })).filter((section) => section.items.length > 0)
-  }, [roleKey])
+  }, [roleKey, isSupervisor])
 
   // Close the drawer whenever the route changes (it is a mobile-only concern).
   useEffect(() => {
@@ -100,7 +95,10 @@ export default function Layout() {
       api
         .get('/approvals/inbox/count')
         .then(({ data }) => {
-          if (!cancelled) setPendingApprovals(data.pending)
+          if (!cancelled) {
+            const count = data.total ?? ((data.pending ?? 0) + (data.early_returns ?? 0))
+            setPendingApprovals(count)
+          }
         })
         .catch(() => {})
     }
@@ -182,7 +180,7 @@ export default function Layout() {
 
         <div className="lms-sidebar__footer lms-sidebar__user">
           <Link to="/account" className="lms-sidebar__account">
-            <span className="lms-user__avatar">{initials(user?.full_name)}</span>
+            <span className="lms-user__avatar">{getInitials(user?.full_name)}</span>
             <span className="lms-sidebar__who">
               <span className="lms-user__name">{user?.full_name}</span>
               <span className="lms-user__roles">{roles.join(' · ')}</span>

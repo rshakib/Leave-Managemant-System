@@ -7,6 +7,8 @@ import CurtailmentDecisionModal from '../components/CurtailmentDecisionModal'
 import DecisionModal from '../components/DecisionModal'
 import { useAutoRefresh } from '../hooks/useAutoRefresh.js'
 
+const PAGE_SIZE = 20
+
 function days(value) {
   const number = Number(value)
   return Number.isFinite(number) ? number.toFixed(2) : '-'
@@ -15,20 +17,32 @@ function days(value) {
 export default function ApprovalsInboxPage() {
   const navigate = useNavigate()
   const [tab, setTab] = useState('PENDING')
+  const [offset, setOffset] = useState(0)
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [decision, setDecision] = useState(null)
   const [curtailmentDecision, setCurtailmentDecision] = useState(null)
+  const [counts, setCounts] = useState({ pending: 0, early_returns: 0, total: 0 })
+
+  const loadCounts = useCallback(async () => {
+    try {
+      const { data } = await api.get('/approvals/inbox/count')
+      setCounts(data)
+    } catch {
+      // count failure doesn't block the list
+    }
+  }, [])
 
   const load = useCallback(async () => {
     try {
+      loadCounts()
       if (tab === 'EARLY_RETURNS') {
         const { data } = await api.get('/curtailments/inbox', { params: { status: 'PENDING' } })
         setItems(data)
       } else {
-        const { data } = await api.get('/approvals/inbox', { params: { status: tab } })
+        const { data } = await api.get('/approvals/inbox', { params: { status: tab, limit: PAGE_SIZE, offset } })
         setItems(data)
       }
       setError('')
@@ -37,7 +51,7 @@ export default function ApprovalsInboxPage() {
     } finally {
       setLoading(false)
     }
-  }, [tab])
+  }, [tab, offset, loadCounts])
 
   useEffect(() => {
     load()
@@ -45,8 +59,8 @@ export default function ApprovalsInboxPage() {
 
   // Live view: reload after any change, when the tab returns, or on the poll.
   useAutoRefresh(() => {
-      load()
-    })
+    load()
+  })
 
   const decided = ({ conflict }) => {
     setDecision(null)
@@ -75,9 +89,40 @@ export default function ApprovalsInboxPage() {
         </Alert>
       )}
 
-      <Tabs activeKey={tab} onSelect={(key) => setTab(key ?? 'PENDING')} className="mb-3">
-        <Tab eventKey="PENDING" title="Pending Requests" />
-        <Tab eventKey="EARLY_RETURNS" title="Early Returns" />
+      <Tabs
+        activeKey={tab}
+        onSelect={(key) => {
+          setTab(key ?? 'PENDING')
+          setOffset(0)
+        }}
+        className="mb-3"
+      >
+        <Tab
+          eventKey="PENDING"
+          title={
+            <span>
+              Pending Requests
+              {counts.pending > 0 && (
+                <Badge bg="danger" pill className="ms-2">
+                  {counts.pending}
+                </Badge>
+              )}
+            </span>
+          }
+        />
+        <Tab
+          eventKey="EARLY_RETURNS"
+          title={
+            <span>
+              Early Returns
+              {counts.early_returns > 0 && (
+                <Badge bg="danger" pill className="ms-2">
+                  {counts.early_returns}
+                </Badge>
+              )}
+            </span>
+          }
+        />
         <Tab eventKey="DECIDED" title="Decided Requests" />
       </Tabs>
 
@@ -94,7 +139,8 @@ export default function ApprovalsInboxPage() {
               : 'You have not decided on any requests yet.'}
         </div>
       ) : (
-        <Table striped bordered hover responsive>
+        <>
+          <Table striped bordered hover responsive>
           <thead>
             {tab === 'EARLY_RETURNS' ? (
               <tr>
@@ -223,6 +269,31 @@ export default function ApprovalsInboxPage() {
             )}
           </tbody>
         </Table>
+
+        {(offset > 0 || items.length === PAGE_SIZE) && tab !== 'EARLY_RETURNS' && (
+          <div className="d-flex justify-content-between align-items-center mt-3">
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+            >
+              ← Previous
+            </Button>
+            <span className="small text-muted">
+              Showing {items.length} row(s) from #{offset + 1}
+            </span>
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              disabled={items.length < PAGE_SIZE}
+              onClick={() => setOffset(offset + PAGE_SIZE)}
+            >
+              Next →
+            </Button>
+          </div>
+        )}
+      </>
       )}
 
       <DecisionModal

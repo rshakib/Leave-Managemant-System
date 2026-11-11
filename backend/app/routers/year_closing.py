@@ -37,7 +37,6 @@ async def closing_preview(
     limit: int = 200,
     session: AsyncSession = Depends(get_session),
 ) -> ClosingPreview:
-    """READ-ONLY dry run — nothing is changed by this endpoint."""
     return ClosingPreview(**await preview(session, year_id, offset=offset, limit=limit))
 
 
@@ -48,7 +47,6 @@ async def close_leave_year(
     session: AsyncSession = Depends(get_session),
     actor: Employee = Depends(get_current_user),
 ) -> ClosingResult:
-    """Close the year and carry days forward — one transaction, not undoable."""
     return ClosingResult(
         **await close_year(
             session,

@@ -1,5 +1,4 @@
-"""Calendar lookups for one employee: weekend days + holidays, then the pure
-day calculation (FR-CAL-2/3/4)."""
+"""Calendar lookup and chargeable-day preview helpers."""
 
 import datetime
 
@@ -20,7 +19,6 @@ GLOBAL_WEEKEND_MISSING = (
 
 
 async def weekend_days_for(session: AsyncSession, employee_id: int) -> set[int]:
-    """The employee's override if one exists, otherwise the global weekend."""
     override = await session.scalar(
         select(WeekendSetting).where(WeekendSetting.employee_id == employee_id)
     )
@@ -41,11 +39,7 @@ async def holidays_in_range(
     start_date: datetime.date,
     end_date: datetime.date,
 ) -> list[Holiday]:
-    """Holidays in the range that apply to this employee.
-
-    Looked up by DATE RANGE, not by leave year, so a request spanning two leave
-    years still finds everything it should (DECISIONS D-75).
-    """
+    """Return holidays overlapping the date range for the employee's scope."""
     statement = (
         select(Holiday)
         .where(Holiday.date >= start_date, Holiday.date <= end_date)
@@ -77,11 +71,8 @@ async def build_preview(
     subtracted: set[datetime.date] = set()
     optional_titles: dict[datetime.date, list[str]] = {}
     for holiday in holidays:
-        # `type` is stored as VARCHAR, so it comes back as a plain str; coerce
-        # it to the enum before comparing (and compare by value, never `is`).
         holiday_type = HolidayType(holiday.type)
         if holiday_type is HolidayType.OPTIONAL:
-            # Informational only — never subtracted (DECISIONS D-71).
             optional_titles.setdefault(holiday.date, []).append(holiday.title)
         else:
             subtracted.add(holiday.date)

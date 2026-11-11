@@ -1,9 +1,3 @@
-"""Password hashing (argon2) and JWT helpers.
-
-argon2-cffi is used directly rather than passlib, which is unmaintained and
-breaks on newer Python versions (DECISIONS D-43).
-"""
-
 import base64
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -23,12 +17,10 @@ _hasher = PasswordHasher()
 
 
 def hash_password(password: str) -> str:
-    """Return an argon2 hash for the given password."""
     return _hasher.hash(password)
 
 
 def _verify_django_pbkdf2(password: str, password_hash: str) -> bool:
-    """Verify Django-style pbkdf2_sha256 password hashes."""
     try:
         parts = password_hash.split("$", 3)
         if len(parts) != 4 or parts[0] != "pbkdf2_sha256":
@@ -48,7 +40,6 @@ def _verify_django_pbkdf2(password: str, password_hash: str) -> bool:
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    """True if the password matches the stored hash; False otherwise."""
     if password_hash.startswith("pbkdf2_sha256$"):
         return _verify_django_pbkdf2(password, password_hash)
     try:
@@ -58,11 +49,6 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def create_access_token(subject: int, expires_minutes: int | None = None) -> str:
-    """Build a signed access token.
-
-    The payload carries only the employee id (`sub`), the token type and the
-    expiry — no roles or personal data (DECISIONS D-44).
-    """
     minutes = settings.access_token_minutes if expires_minutes is None else expires_minutes
     payload = {
         "sub": str(subject),
@@ -73,5 +59,4 @@ def create_access_token(subject: int, expires_minutes: int | None = None) -> str
 
 
 def decode_access_token(token: str) -> dict:
-    """Decode and validate a token. Raises jwt.PyJWTError subclasses."""
     return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])

@@ -29,7 +29,6 @@ async def put_employee_approvers(
     session: AsyncSession = Depends(get_session),
     actor: Employee = Depends(get_current_user),
 ) -> list[ApproverRead]:
-    """Replace the employee's active approver set with exactly this list."""
     employee = await session.get(Employee, employee_id)
     if employee is None:
         raise HTTPException(
@@ -51,12 +50,6 @@ async def list_approver_assignments(
     only_missing: bool = False,
     session: AsyncSession = Depends(get_session),
 ) -> list[EmployeeApproversRead]:
-    """One row per ACTIVE employee, with that employee's active approvers.
-
-    Deliberately uses a fixed number of queries (employees, approver rows, then
-    the approver employees) instead of one query per employee — that is the
-    "N+1 query" problem (DECISIONS D-83).
-    """
     statement = (
         select(Employee).where(Employee.is_active.is_(True)).order_by(Employee.id)
     )
@@ -68,7 +61,6 @@ async def list_approver_assignments(
     if not employees:
         return []
 
-    # Query 2: every active approver row for those employees, in one go.
     rows = (
         await session.scalars(
             select(EmployeeApprover)
@@ -93,7 +85,6 @@ async def list_approver_assignments(
         if not employees:
             return []
 
-    # Query 3: the approver employees themselves.
     approver_ids = {
         approver_id
         for employee in employees
@@ -138,5 +129,4 @@ async def my_approvers(
     current: Employee = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> list[ApproverRead]:
-    """The signed-in user's own approvers. It takes no id on purpose."""
     return await approver_reads(session, current.id)

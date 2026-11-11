@@ -131,7 +131,9 @@ export default function AdminAuditLogPage() {
   useEffect(() => {
     let cancelled = false
     const load = async () => {
-      setLoading(true)
+      if (!page) {
+        setLoading(true)
+      }
       try {
         const { data } = await api.get('/admin/audit-log', {
           params: { ...apiParams, limit: PAGE_SIZE },
@@ -152,6 +154,9 @@ export default function AdminAuditLogPage() {
       cancelled = true
     }
   }, [apiParams, reloadKey])
+
+  // Live real-time update (event-driven, silent background update with no spinner)
+  useAutoRefresh(() => setReloadKey((k) => k + 1))
 
   const apply = () => {
     setSearchParams(paramsFromForm(form, 0))
@@ -175,9 +180,6 @@ export default function AdminAuditLogPage() {
       setError(errorMessage(err, 'Could not load that audit entry.'))
     }
   }, [])
-
-  // Live view: reload after any change, when the tab returns, or on the poll.
-  useAutoRefresh(() => setReloadKey((key) => key + 1))
 
   return (
     <>

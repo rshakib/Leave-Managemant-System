@@ -1,9 +1,4 @@
-"""The employee's own list of signed-in devices (DECISIONS D-191).
-
-Only the SHAPE of a session is exposed — a device name, when it started, when it
-was last used and when it expires. The token hash never leaves the database, and
-no IP address is stored or shown (D-163).
-"""
+"""Employee active session management service."""
 
 import datetime
 import uuid
@@ -22,7 +17,6 @@ from app.core.config import settings
 
 
 async def family_for_cookie(session: AsyncSession, raw_cookie: str | None) -> uuid.UUID | None:
-    """Which family does THIS browser's refresh cookie belong to?"""
     if not raw_cookie:
         return None
     return await session.scalar(
@@ -69,12 +63,6 @@ async def list_sessions(
 async def revoke_session(
     session: AsyncSession, employee: Employee, family_id: uuid.UUID
 ) -> int:
-    """End ONE of the employee's own sessions.
-
-    A family that does not belong to the caller answers 404, exactly like a
-    missing one, so the API never reveals that somebody else's session exists
-    (the same rule as DECISIONS D-89).
-    """
     owned = await session.scalar(
         select(func.count())
         .select_from(RefreshToken)

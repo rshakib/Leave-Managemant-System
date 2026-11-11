@@ -1,8 +1,4 @@
-"""Pure helpers for reports and CSV export (NFR-4).
-
-No database, no HTTP — just formatting and validation that both the JSON and the
-CSV endpoints must agree on.
-"""
+"""Pure formatting, sanitization, and filter validation rules for reports."""
 
 import csv
 import datetime
@@ -10,14 +6,11 @@ import io
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 
-# A text cell starting with any of these can be run as a formula by a
-# spreadsheet program ("CSV injection"), so we prefix it with an apostrophe.
 DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
-MAX_RANGE_DAYS = 1830  # about five years
+MAX_RANGE_DAYS = 1830
 MAX_LIMIT = 100
 
-# Fixed words only — never anything the user typed.
 SAFE_KINDS = ("balances", "history")
 
 
@@ -29,11 +22,7 @@ class ReportError(Exception):
 
 
 def csv_safe(value):
-    """Neutralise a TEXT cell that a spreadsheet might treat as a formula.
-
-    Non-strings (numbers, dates, decimals) and None are returned unchanged
-    (None becomes an empty cell).
-    """
+    """Escape leading formula characters in text cells to prevent CSV injection."""
     if value is None:
         return ""
     if not isinstance(value, str):
@@ -45,7 +34,6 @@ def csv_safe(value):
 
 
 def format_decimal(value) -> str:
-    """Always two decimals, a dot, and never exponent notation."""
     if value is None:
         return ""
     try:
@@ -87,7 +75,6 @@ def export_filename(report_kind: str, today: datetime.date) -> str:
 
 
 def org_local_iso(value: datetime.datetime | None, tz_name: str) -> str:
-    """UTC instant -> ISO text in the organisation's timezone, no microseconds."""
     if value is None:
         return ""
     if value.tzinfo is None:
@@ -97,7 +84,6 @@ def org_local_iso(value: datetime.datetime | None, tz_name: str) -> str:
 
 
 def csv_bytes(header: list[str], rows) -> bytes:
-    """Small helper: one CSV chunk as UTF-8 (no BOM — the caller adds it)."""
     buffer = io.StringIO()
     writer = csv.writer(buffer, quoting=csv.QUOTE_MINIMAL, lineterminator="\r\n")
     if header:

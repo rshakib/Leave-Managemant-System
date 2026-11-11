@@ -3,14 +3,6 @@
 Revision ID: 8b7c1970e916
 Revises: 5ec98b92db3d
 Create Date: 2026-10-25 16:23:59.497796
-
-Creates the `employee_approver` table (FR-APR-1/2) and enables Row Level
-Security, as in earlier phases.
-
-Backfill (FR-APR-2): an employee whose supervisor is already set should get that
-supervisor as an approver. This runs only when at least one ACTIVE employee has
-a supervisor; when there are none (the case on this database) it is skipped and
-nothing is inserted.
 """
 from typing import Sequence, Union
 
@@ -42,10 +34,8 @@ def upgrade() -> None:
     sa.UniqueConstraint('employee_id', 'approver_id', name='uq_employee_approver')
     )
 
-    # Supabase: block the public Data API (anon/authenticated) from this table.
     op.execute("ALTER TABLE employee_approver ENABLE ROW LEVEL SECURITY")
 
-    # --- data migration: supervisor -> approver (FR-APR-2) -------------------
     connection = op.get_bind()
     pending = connection.execute(
         sa.text(
